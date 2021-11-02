@@ -1,0 +1,297 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel LocalFullSortKernel
+#pragma kernel LocalShearKernel
+#pragma kernel GlobalMirrorKernel
+#pragma kernel GlobalShearKernel
+#pragma kernel GlobalCopyBufferToTexture
+
+#define NUM_THREADS 512
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+RWTexture2D<float4> _Result;
+
+RWStructuredBuffer<float> _Color;
+RWStructuredBuffer<uint> _Index;
+groupshared float Local_Color[2 * NUM_THREADS];
+groupshared uint Local_Index[2 * NUM_THREADS];
+
+uniform uint _TexWidth;
+uniform uint _TexHeight;
+
+uniform uint _HeightPower;
+
+/*
+BITONIC MERGE SORT
+See https://en.wikipedia.org/wiki/Bitonic_sorter#Alternative_representation and https://poniesandlight.co.uk/reflect/bitonic_merge_sort/
+for a more detailed explanation
+
+0--*---*-----*---*---------*-----*---*-----------------*---------*-----*----
+   |   |     |   |         |     |   |                 |         |     |    
+1--*---|-*---*---|-*-------|-*---*---|-*---------------|-*-------|-*---*----
+       | |       | |       | |       | |               | |       | |        
+2--*---|-*---*---|-|-*-----*-|---*---|-|-*-------------|-|-*-----*-|---*----
+   |   |     |   | | |       |   |   | | |             | | |       |   |    
+3--*---*-----*---|-|-|-*-----*---*---|-|-|-*-----------|-|-|-*-----*---*----
+                 | | | |             | | | |           | | | |              
+4--*---*-----*---|-|-|-*---*-----*---|-|-|-|-*---------*-|-|-|---*-----*----
+   |   |     |   | | |     |     |   | | | | |           | | |   |     |    
+5--*---|-*---*---|-|-*-----|-*---*---|-|-|-|-|-*---------*-|-|---|-*---*----
+       | |       | |       | |       | | | | | |           | |   | |        
+6--*---|-*---*---|-*-------*-|---*---|-|-|-|-|-|-*---------*-|---*-|---*----
+   |   |     |   |           |   |   | | | | | | |           |     |   |    
+7--*---*-----*---*-----------*---*---|-|-|-|-|-|-|-*---------*-----*---*----
+                                     | | | | | | | |                        
+8--*---*-----*---*---------*-----*---|-|-|-|-|-|-|-*---*---------*-----*----
+   |   |     |   |         |     |   | | | | | | |     |         |     |    
+9--*---|-*---*---|-*-------|-*---*---|-|-|-|-|-|-*-----|-*-------|-*---*----
+       | |       | |       | |       | | | | | |       | |       | |        
+10-*---|-*---*---|-|-*-----*-|---*---|-|-|-|-|-*-------|-|-*-----*-|---*----
+   |   |     |   | | |       |   |   | | | | |         | | |       |   |     
+11-*---*-----*---|-|-|-*-----*---*---|-|-|-|-*---------|-|-|-*-----*---*----
+                 | | | |             | | | |           | | | |              
+12-*---*-----*---|-|-|-*---*-----*---|-|-|-*-----------*-|-|-|---*-----*----
+   |   |     |   | | |     |     |   | | |               | | |   |     |    
+13-*---|-*---*---|-|-*-----|-*---*---|-|-*---------------*-|-|---|-*---*----
+       | |       | |       | |       | |                   | |   | |        
+14-*---|-*---*---|-*-------*-|---*---|-*-------------------*-|---*-|---*----
+   |   |     |   |           |   |   |                       |     |   |    
+15-*---*-----*---*-----------*---*---*-----------------------*-----*---*----
+h  2   4         8                   16
+                                    |----Mirror----|-------Shear--------|
+
+This sorting method works by repeatedly sorting groups of elements, starting with groups of 2 and doubling the group size after each step
+until the group size is equal to the entire data set. The group size of each step will be referred to as its height h. Each step is composed
+of several distinct sub-steps: a single "mirror" step followed by a number of "shear" steps. The "mirror" step compares and swaps each element
+in the first half of the group with the element whose index within the group is equal to h - 1  minus the index of the element. For example
+with a group size of 4, element 0 is compared to element 3, and element 1 is compared to element 2. The mirror is then followed by 0 or more
+shear steps. Each shear step operates on groups of half the previous shear's group size (or half of h if it is the first step), and the shears
+repeat until their group size is 2. Each shear step compares and swaps each element in the first half of its group with the element whose index
+within the group is equal to half the group size plus the index of the element. For example, the first shear step of h = 16 compares
+element 0 to element 4, 1 to 5, 2 to 6, and 3 to 7. The next shear compares 0 to 2, and 1 to 3. The last shear compares 0 to 1.
+
+*/
+
+// Common factor used to calculate the indicies of the pairs of numbers to compare in both the mirror and shear steps
+inline uint q_calc(const uint t, const uint h_pow)
+{
+    return ((t << 1) >> h_pow) << h_pow;
+}
+
+// Common factor used to calculate the indicies of the pairs of numbers to compare in both the mirror and shear steps
+inline uint m_calc(const uint t, const uint h)
+{
+    uint h2 = max(1, (h >> 1));
+    return t % h2;
+}
+
+// Given a thread number, calculate the pair of indicies of the numbers to compare in a mirror step
+inline void calc_mirror_index(inout uint index1, inout uint index2, const uint h, const uint q, const uint m)
+{
+    index1 = q + m;
+    index2 = q + h - m - 1;
+}
+
+// Given a thread number, calculate the pair of indicies of the numbers to compare in a shear step
+inline void calc_shear_index(inout uint index1, inout uint index2, const uint h, const uint q, const uint m)
+{
+    index1 = q + m;
+    index2 = q + m + (h >> 1);
+}
+
+// Sort pairs of colors and pixel cordinates by the colors in the local groupshared array
+void local_sort_pair(uint i1, uint i2)
+{
+    if (Local_Color[i1] < Local_Color[i2])
+    {
+        float tmpColor = Local_Color[i1];
+        int tmpIndex = Local_Index[i1];
+        Local_Color[i1] = Local_Color[i2];
+        Local_Index[i1] = Local_Index[i2];
+        Local_Color[i2] = tmpColor;
+        Local_Index[i2] = tmpIndex;
+    }
+}
+
+// Sort pairs of colors and pixel cordinates by the colors in the global compute buffers
+void global_sort_pair(uint i1, uint i2)
+{
+    if (_Color[i1] < _Color[i2])
+    {
+        float tmpColor = _Color[i1];
+        int tmpIndex = _Index[i1];
+        _Color[i1] = _Color[i2];
+        _Index[i1] = _Index[i2];
+        _Color[i2] = tmpColor;
+        _Index[i2] = tmpIndex;
+    }
+}
+
+// Mirror a single pair of colors in the groupshared array
+void local_sort_mirror(const uint t, const uint h, const uint h_pow)
+{
+    uint q, m;
+    uint i1, i2;
+    q = q_calc(t, h_pow);
+    m = m_calc(t, h);
+    calc_mirror_index(i1, i2, h, q, m);
+    local_sort_pair(i1, i2);
+}
+
+// Mirror a single pair of colors in the compute buffer
+void global_sort_mirror(const uint t, const uint h, const uint h_pow)
+{
+    uint q, m;
+    uint i1, i2;
+    q = q_calc(t, h_pow);
+    m = m_calc(t, h);
+    calc_mirror_index(i1, i2, h, q, m);
+    global_sort_pair(i1, i2);
+}
+
+
+// Shear a single pair of colors in the groupshared array
+void local_sort_shear(const uint t, const uint h, const uint h_pow)
+{
+    uint q, m;
+    uint i1, i2;
+    q = q_calc(t, h_pow);
+    m = m_calc(t, h);
+    calc_shear_index(i1, i2, h, q, m);
+    local_sort_pair(i1, i2);
+}
+
+// Shear a single pair of colors in the compute buffer
+void global_sort_shear(const uint t, const uint h, const uint h_pow)
+{
+    uint q, m;
+    uint i1, i2;
+    q = q_calc(t, h_pow);
+    m = m_calc(t, h);
+    calc_shear_index(i1, i2, h, q, m);
+    global_sort_pair(i1, i2);
+}
+
+//Perform shears in local memory until h = 2
+void local_full_shear(const uint t, uint h, uint h_pow)
+{
+    uint h_temp_pow = h_pow;
+    for (uint h_temp = h; h_temp >= 2; h_temp = h_temp >> 1)
+    {
+        local_sort_shear(t, h_temp, h_temp_pow);
+        GroupMemoryBarrierWithGroupSync();
+        h_temp_pow -= 1;
+    }
+}
+
+//Do a full bitonic sort up to a groupsize of 2 * number of threads, which is the length of each of the groupshared arrays,
+//or until we sort all the elements in the texture if it is small
+void local_full_sort(const uint t)
+{
+    uint h_pow = 1;
+    uint h;
+    uint maxIter = max(2 * NUM_THREADS, _TexWidth * _TexHeight);
+    for (h = 2; h <= maxIter; h = h << 1)
+    {
+        local_sort_mirror(t, h, h_pow);
+        GroupMemoryBarrierWithGroupSync();
+        uint h2_pow = h_pow - 1;
+        uint h2 = h >> 1;
+        local_full_shear(t, h2, h2_pow);
+        h_pow += 1;
+    }
+}
+
+[numthreads(NUM_THREADS, 1, 1)]
+void LocalFullSortKernel(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    //if (group.x*NUM_THREADS < ((_TexWidth * _TexHeight) >> 1)) // if the thread's id is bigger than half of the number of elements to sort, then skip all calculations.
+    //{
+        //copy two elements per thread into local group-shared memory
+        uint even = thread << 1;
+        uint odd = even + 1;
+        uint prevGroupThreads = group.x * NUM_THREADS;
+        uint globalEvenIndex = 2 * prevGroupThreads + even;
+        uint globalOddIndex = 2 * prevGroupThreads + odd;
+
+        Local_Color[even] = _Color[globalEvenIndex];
+        Local_Color[odd] = _Color[globalOddIndex];
+        Local_Index[even] = _Index[globalEvenIndex];
+        Local_Index[odd] = _Index[globalOddIndex];
+
+        //Sync the group to make sure all elements have been copied to the shared memory
+        GroupMemoryBarrierWithGroupSync();
+
+        //Sort all elements in the local cache doing bitonic merge sorting, doing group heights from 2 to 2 * NUM_THREADS
+        local_full_sort(thread);
+
+        GroupMemoryBarrierWithGroupSync();
+
+        //Copy the sorted elments in local memory back into the global buffers
+        _Color[globalEvenIndex] = Local_Color[even];
+        _Index[globalEvenIndex] = Local_Index[even];
+        _Color[globalOddIndex] = Local_Color[odd];
+        _Index[globalOddIndex] = Local_Index[odd];
+    //}
+}
+
+
+[numthreads(NUM_THREADS, 1, 1)]
+void LocalShearKernel(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    uint even = thread << 1;
+    uint odd = even + 1;
+    uint prevGroupThreads = group.x * NUM_THREADS;
+    uint globalEvenIndex = 2 * prevGroupThreads + even;
+    uint globalOddIndex = 2 * prevGroupThreads + odd;
+
+    Local_Color[even] = _Color[globalEvenIndex];
+    Local_Color[odd] = _Color[globalOddIndex];
+    Local_Index[even] = _Index[globalEvenIndex];
+    Local_Index[odd] = _Index[globalOddIndex];
+
+    GroupMemoryBarrierWithGroupSync();
+
+    uint h = 1 << _HeightPower;
+    local_full_shear(thread, h, _HeightPower);
+
+    GroupMemoryBarrierWithGroupSync();
+
+    _Color[globalEvenIndex] = Local_Color[even];
+    _Index[globalEvenIndex] = Local_Index[even];
+    _Color[globalOddIndex] = Local_Color[odd];
+    _Index[globalOddIndex] = Local_Index[odd];
+}
+
+[numthreads(NUM_THREADS, 1, 1)]
+void GlobalMirrorKernel(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+
+    uint h = 1 << _HeightPower;
+    global_sort_mirror(id.x, h, _HeightPower);
+    AllMemoryBarrierWithGroupSync();
+}
+
+[numthreads(NUM_THREADS, 1, 1)]
+void GlobalShearKernel(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    uint h = 1 << _HeightPower;
+    global_sort_shear(id.x, h, _HeightPower);
+    AllMemoryBarrierWithGroupSync();
+}
+
+[numthreads(NUM_THREADS, 1, 1)]
+void GlobalCopyBufferToTexture(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
+{
+    uint even = thread << 1;
+    uint odd = even + 1;
+    uint prevGroupThreads = group.x * NUM_THREADS;
+
+    uint globalIndex = 2 * prevGroupThreads + even;
+    uint2 uv = uint2(globalIndex % _TexWidth, globalIndex / _TexWidth);
+    _Result[uv] = float4(_Color[globalIndex], 0, 0, 1);
+    //_Result[uv] = float4(group.x, 0, 0, 1);
+
+    globalIndex = 2 * prevGroupThreads + odd;
+    uv = uint2(globalIndex % _TexWidth, globalIndex / _TexWidth);
+    _Result[uv] = float4(_Color[globalIndex], 0, 0, 1);
+}

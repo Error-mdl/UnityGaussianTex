@@ -1,0 +1,266 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CopyTexture
+#pragma kernel SplitTextureAndIndex
+#pragma kernel AverageImage
+#pragma kernel ImageCovDiagonal
+#pragma kernel ImageCovUpper
+#pragma kernel MaxImage
+#pragma kernel MinImage
+#pragma kernel TransformColorsToEigenSpace
+#pragma kernel TransformColorsToBoundingBox
+#pragma kernel SwizzleColors
+
+
+
+// Create a RenderTexture with enableRandomWrite flag and set it
+// with cs.SetTexture
+Texture2D<float4> _TexIn;
+RWTexture2D<float4> _TexOut;
+
+RWStructuredBuffer<float> _Red;
+RWStructuredBuffer<float> _Green;
+RWStructuredBuffer<float> _Blue;
+RWStructuredBuffer<float> _Alpha;
+RWStructuredBuffer<uint> _IndexR;
+RWStructuredBuffer<uint> _IndexG;
+RWStructuredBuffer<uint> _IndexB;
+RWStructuredBuffer<uint> _IndexA;
+
+RWStructuredBuffer<float> _BufferAvg;
+
+
+uniform int _Mip;
+uniform uint _TexWidth;
+uniform uint _TexHeight;
+uniform uint _KernelWidth;
+uniform uint _KernelHeight;
+
+uniform float4 _EigenVector1;
+uniform float4 _EigenVector2;
+uniform float4 _EigenVector3;
+uniform float4 _MinColor;
+uniform float4 _MaxColor;
+uniform int4 _SwizzleMask;
+
+[numthreads(32, 32, 1)]
+void CopyTexture(uint3 id: SV_DispatchThreadID)
+{
+    uint2 uv = uint2(id.x, id.y);
+    if (uv.x < _TexWidth && uv.y < _TexHeight)
+    {
+        _TexOut[uv] = _TexIn.Load(int3(uv, _Mip));
+    }
+}
+
+/*
+ * Splits RBGA channels of _TexIn image into separate 1d compute buffers,
+ * as well as storing the unrolled 1d coordinates of each pixel in 4
+ * identical compute buffers corresponding to each color channel.
+ */
+[numthreads(1024,1,1)]
+void SplitTextureAndIndex (uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth * _TexHeight)
+    {
+        int x = id.x % _TexWidth;
+        int y = id.x / _TexWidth;
+        float4 colorIn = _TexIn.Load(int3(x, y, _Mip));
+        _Red[id.x] = colorIn.r;
+        _Green[id.x] = colorIn.g;
+        _Blue[id.x] = colorIn.b;
+        _Alpha[id.x] = colorIn.a;
+        _IndexR[id.x] = id.x;
+        _IndexG[id.x] = id.x;
+        _IndexB[id.x] = id.x;
+        _IndexA[id.x] = id.x;
+    }
+}
+
+/* AverageImage
+ *
+ * Iteratively computes the average color of an image by averaging _KernelWidth * _KernelHeight blocks of pixels,
+ * and storing the results in the 1st (_TexWidth / _KernelWidth) by (_TexWidth / _KernelHeight) rectangle in the 
+ * output image.
+ *
+ * To use, repeatedly call the kernel and after each call swap the input an output rendertextures and divide
+ * _TexWidth and _TexHeight by the kernel width and height respectively. Repeat until either _TexWidth or
+ * _TexHeight is equal to the respective dimension of the kernel. Then set the kernel dimensions to the image
+ * dimensions, and run the kernel one final time, during which it will copy the final average values computed
+ * into the _BufferAvg buffer rather than back into the output texture.
+ */
+
+[numthreads(1024,1,1)]
+void AverageImage(uint3 id : SV_DispatchThreadID)
+{
+
+    int isInBounds = id.x < ((_TexWidth * _TexHeight) / (_KernelWidth * _KernelHeight));
+
+    uint2 BlockCoords = uint2(id.x % (_TexWidth / _KernelWidth), id.x / ((_TexWidth / _KernelWidth)));
+    float4 sum = float4(0.0, 0.0, 0.0, 0.0);
+
+    if (isInBounds)
+    {
+        uint2 PixelCoords = BlockCoords * int2(_KernelWidth, _KernelHeight);
+       
+        for (uint i = 0; i < _KernelWidth; i++)
+        {
+            for (uint j = 0; j < _KernelHeight; j++)
+            {
+                sum += _TexIn[PixelCoords + uint2(i, j)];
+            }
+        }
+    }
+    AllMemoryBarrierWithGroupSync();
+    if ((id.x == 0) && (_KernelWidth * _KernelHeight == _TexWidth * _TexHeight))
+    {
+        float4 avg = sum / (_KernelWidth * _KernelHeight);
+        _BufferAvg[0] = avg.r;
+        _BufferAvg[1] = avg.g;
+        _BufferAvg[2] = avg.b;
+        _BufferAvg[3] = avg.a;
+    }
+    else if (isInBounds)
+    {
+        _TexOut[BlockCoords] = sum / (_KernelWidth * _KernelHeight);
+    }
+}
+
+/* ImageCovDiagonal
+ *
+ * Computes the square of the color of each pixel minus the mean color for each pixel of _TexIn,
+ * and stores it in _TexOut. This is used to compute the diagonal of the RGB covariance matrix.
+ *
+ */
+[numthreads(1024, 1, 1)]
+void ImageCovDiagonal(uint id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth * _TexHeight)
+    {
+        int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
+        float4 texColor = _TexIn[uv];
+        float4 meanDifference = texColor - float4(_BufferAvg[0], _BufferAvg[1], _BufferAvg[2], _BufferAvg[3]);
+        _TexOut[uv] = meanDifference * meanDifference;
+    }
+}
+
+/* ImageCovDiagonal
+ *
+ * Computes (red - red average) * (green - green average), (green - green average) *  (blue - blue average),
+ * and (red - red average) * (blue - blue average) of eac pixel of _TexIn, and stores it in the rgb
+ * components of _texOut. These values, when averaged, correspond to the upper 3 non-diagonal components
+ * of the RGB covarience matrix (and the lower values, as the matrix is symmetric).
+ * 
+ */
+
+[numthreads(1024, 1, 1)]
+void ImageCovUpper(uint id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth * _TexHeight)
+    {
+        int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
+        float4 texColor = _TexIn[uv];
+        float4 meanDifference = texColor - float4(_BufferAvg[0], _BufferAvg[1], _BufferAvg[2], _BufferAvg[3]);
+        _TexOut[uv] = float4(meanDifference.x * meanDifference.y, meanDifference.y * meanDifference.z, meanDifference.x * meanDifference.z, 1.0);
+    }
+}
+
+[numthreads(1024, 1, 1)]
+void MaxImage(uint3 id : SV_DispatchThreadID)
+{
+    int isInBounds = id.x < ((_TexWidth * _TexHeight) / (_KernelWidth * _KernelHeight));
+
+    uint2 BlockCoords = uint2(id.x % (_TexWidth / _KernelWidth), id.x / ((_TexWidth / _KernelWidth)));
+    float4 maxPix = float4(-1.0e125, -1.0e125, -1.0e125, -1.0e125);
+
+    if (isInBounds)
+    {
+        uint2 PixelCoords = BlockCoords * int2(_KernelWidth, _KernelHeight);
+
+        for (uint i = 0; i < _KernelWidth; i++)
+        {
+            for (uint j = 0; j < _KernelHeight; j++)
+            {
+                maxPix = max(_TexIn[PixelCoords + uint2(i, j)], maxPix);
+            }
+        }
+    }
+    AllMemoryBarrierWithGroupSync();
+    if ((id.x == 0) && (_KernelWidth * _KernelHeight == _TexWidth * _TexHeight))
+    {
+        _BufferAvg[0] = maxPix.r;
+        _BufferAvg[1] = maxPix.g;
+        _BufferAvg[2] = maxPix.b;
+        _BufferAvg[3] = maxPix.a;
+    }
+    else if (isInBounds)
+    {
+        _TexOut[BlockCoords] = maxPix;
+    }
+}
+
+[numthreads(1024, 1, 1)]
+void MinImage(uint3 id : SV_DispatchThreadID)
+{
+    int isInBounds = id.x < ((_TexWidth * _TexHeight) / (_KernelWidth * _KernelHeight));
+
+    uint2 BlockCoords = uint2(id.x % (_TexWidth / _KernelWidth), id.x / ((_TexWidth / _KernelWidth)));
+    float4 minPix = float4(1.0e125, 1.0e125, 1.0e125, 1.0e125);
+
+    if (isInBounds)
+    {
+        uint2 PixelCoords = BlockCoords * int2(_KernelWidth, _KernelHeight);
+
+        for (uint i = 0; i < _KernelWidth; i++)
+        {
+            for (uint j = 0; j < _KernelHeight; j++)
+            {
+                minPix = min(_TexIn[PixelCoords + uint2(i, j)], minPix);
+            }
+        }
+    }
+    AllMemoryBarrierWithGroupSync();
+    if ((id.x == 0) && (_KernelWidth * _KernelHeight == _TexWidth * _TexHeight))
+    {
+        _BufferAvg[0] = minPix.r;
+        _BufferAvg[1] = minPix.g;
+        _BufferAvg[2] = minPix.b;
+        _BufferAvg[3] = minPix.a;
+    }
+    else if (isInBounds)
+    {
+        _TexOut[BlockCoords] = minPix;
+    }
+}
+
+[numthreads(1024, 1, 1)]
+void TransformColorsToEigenSpace(uint3 id : SV_DispatchThreadID)
+{
+    int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
+    float4 color = _TexOut[uv];
+    float4 colorNew = float4(0, 0, 0, color.a);
+    colorNew.r = dot(color.rgb, float3(_EigenVector1[0], _EigenVector1[1], _EigenVector1[2]));
+    colorNew.g = dot(color.rgb, float3(_EigenVector2[0], _EigenVector2[1], _EigenVector2[2]));
+    colorNew.b = dot(color.rgb, float3(_EigenVector3[0], _EigenVector3[1], _EigenVector3[2]));
+    _TexOut[uv] = colorNew;
+}
+
+[numthreads(1024, 1, 1)]
+void TransformColorsToBoundingBox(uint3 id : SV_DispatchThreadID)
+{
+    int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
+    float4 color = _TexOut[uv];
+    float3 min = float3(_MinColor[0], _MinColor[1], _MinColor[2]);
+    float3 max = float3(_MaxColor[0], _MaxColor[1], _MaxColor[2]);
+    float3 length = max - min;
+    color.rgb = length == 0 ? float3(0,0,0) : (color.rgb - min) / length;
+    _TexOut[uv] = color;
+}
+
+
+[numthreads(1024, 1, 1)]
+void SwizzleColors(uint3 id : SV_DispatchThreadID)
+{
+    int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
+    float4 color = _TexOut[uv];
+    _TexOut[uv] = float4(color[_SwizzleMask[0]], color[_SwizzleMask[1]], color[_SwizzleMask[2]], color[_SwizzleMask[3]]);
+}

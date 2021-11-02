@@ -1,0 +1,123 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CreateInvCDFTexture
+#pragma kernel CreateLookupTable
+#pragma kernel CompressionCorrection
+
+#define NUM_THREADS 1024
+#define NUM_THREADS_2D 32
+#define MAX_DIM_LUT 32
+
+#define alpha   1.128379167095512573896 // 2 / sqrt(pi)
+#define beta    0.102772603301939973205 // (8 - 2 * pi)/(3 * pi^1.5)
+#define gamma   3.826116760542201589481 // 2*sqrt(alpha/3*beta)
+#define epsilon 0.694877062764156364381 // 1 / ( (alpha/3*beta)^1.5 * 2*beta)
+#define sqrt2   1.414213562373095048802
+
+#define gaussian_mu 0.5
+#define gaussian_sigma 0.1666666667
+#define gaussian_correction 1.0026
+#define gaussian_inv_correction 0.997665462817
+
+RWTexture2D<float4> _TexOut;
+RWStructuredBuffer<uint> _Index;
+
+
+RWStructuredBuffer<float> _Red;
+RWStructuredBuffer<float> _Green;
+RWStructuredBuffer<float> _Blue;
+RWStructuredBuffer<float> _Alpha;
+
+uniform uint _TexWidth;
+uniform uint _TexHeight;
+uniform float4 _ColorMask;
+uniform float4 _InvAxisLengths;
+uniform int _LUTWidth;
+uniform int _LUTHeight;
+
+// hlsl doesn't have asinh despite having sinh, so we need to make our own
+float arcsinh(const float x)
+{
+    return log(x + sqrt(x * x + 1));
+}
+
+// hlsl doesn't have atanh despite having tanh, so we need to make our own
+float arctanh(const float x)
+{
+    return 0.5 * log((1.0 + x) / (1.0 - x));
+}
+
+
+/* The inverse error function is properly calculated by an infinite talyor series that converges EXTREMELY slowly
+ * for inputs close to 1, so instead we're going to use an approximation based on hyperbolic functions that is close
+ * enough for the level of precision we require.
+ * See  John D. Vedder, "Simple approximations for the error function and its inverse", American Journal of Physics 55, 762 - 763 (1987)
+ */
+float InvErf(const float x)
+{
+    float part1 = epsilon * arctanh(x);
+    float part2 = 0.333333333333333 * arcsinh(part1);
+    return gamma * sinh(part2);
+}
+
+float Quantile(const float index, const float numElements)
+{
+    return (index + 0.5) / numElements;
+}
+
+float InvCDF(const float U, const float mu, const float sigma)
+{
+    float x = 2.0 * U - 1.0;
+    float invErfx = InvErf(gaussian_inv_correction * x);
+    return mu + sigma * sqrt2 * invErfx;
+}
+
+float Erf(const float x)
+{
+    float e = exp(-x * x);
+    return alpha * sign(x) * sqrt(1.0 - e) * ((1.0/alpha) + 0.155 * e - 0.042625 * e * e);
+}
+
+float CDF(const float x, const float mu, const float sigma)
+{
+    float erf = Erf((x-mu)/(sigma*sqrt2));
+    return 0.5 * (1 + gaussian_correction * erf);
+}
+
+[numthreads(NUM_THREADS,1,1)]
+void CreateInvCDFTexture (uint3 id : SV_DispatchThreadID)
+{
+    int index = _Index[id.x];
+    float U = Quantile((float)id.x, (float)(_TexWidth * _TexHeight));
+    float invCDF = InvCDF(U, gaussian_mu, gaussian_sigma);
+    int2 uv = int2(index % _TexWidth, index / _TexWidth);
+    float4 color = _TexOut[uv] * (1.0 - _ColorMask) + invCDF * _ColorMask;
+    _TexOut[uv] = color;
+}
+
+[numthreads(MAX_DIM_LUT, MAX_DIM_LUT, 1)]
+void CreateLookupTable(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _LUTWidth && id.y < _LUTHeight)
+    {
+        float x = Quantile(id.x + _LUTWidth * id.y, _LUTWidth * _LUTHeight);
+        float U = CDF(x, gaussian_mu, gaussian_sigma);
+        int index = (int)floor((double)U * (double)(_TexWidth * _TexHeight));
+        float R = _Red[index];
+        float G = _Green[index];
+        float B = _Blue[index];
+        float A = _Alpha[index];
+        float4 color = float4(R, G, B, A);
+        _TexOut[id.xy] = color;
+    }
+}
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void CompressionCorrection(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth && id.y < _TexHeight)
+    {
+        float4 inColor = _TexOut.Load(id.xy);
+        float4 outColor = (inColor - 0.5) * _InvAxisLengths + 0.5;
+        _TexOut[id.xy] = outColor;
+    }
+}
