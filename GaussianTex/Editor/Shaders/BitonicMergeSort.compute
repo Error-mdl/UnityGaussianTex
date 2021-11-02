@@ -5,7 +5,7 @@
 #pragma kernel GlobalShearKernel
 #pragma kernel GlobalCopyBufferToTexture
 
-#define NUM_THREADS 512
+#define NUM_THREADS 1024
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
 RWTexture2D<float4> _Result;

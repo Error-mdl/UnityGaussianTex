@@ -138,7 +138,7 @@ public class GaussTexUI : EditorWindow
           string outputImagePath = Path.Combine(inputPath, inputName + "_gauss.png");
           string outputLUTPath = Path.Combine(inputPath, inputName + "_lut.png");
           string outputColorspacePath = Path.Combine(inputPath, inputName + "_Colorspace.asset");
-          Selection.activeObject = AssetDatabase.LoadMainAssetAtPath(outputImagePath);
+          EditorGUIUtility.PingObject(AssetDatabase.LoadMainAssetAtPath(outputImagePath));
           EditorUtility.DisplayDialog("Textures Successfully Created", 
             string.Format("Created:\n{0}\n{1}\n{2}", outputImagePath, outputLUTPath, outputColorspacePath), "Ok");
         }

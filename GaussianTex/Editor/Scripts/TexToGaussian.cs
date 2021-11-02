@@ -821,11 +821,11 @@ namespace GaussianTexture
        *
        */
 
-      if (!File.Exists(Path.Combine(dataPath, outputImagePath)))
+      if (AssetDatabase.LoadMainAssetAtPath(outputImagePath) == null)
       {
         AssetDatabase.ImportAsset(outputImagePath);
       }
-      if (!File.Exists(Path.Combine(dataPath, outputLUTPath)))
+      if (AssetDatabase.LoadMainAssetAtPath(outputLUTPath) == null)
       {
         AssetDatabase.ImportAsset(outputLUTPath);
       }
