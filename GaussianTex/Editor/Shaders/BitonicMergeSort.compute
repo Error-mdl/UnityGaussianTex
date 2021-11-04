@@ -3,12 +3,12 @@
 #pragma kernel LocalShearKernel
 #pragma kernel GlobalMirrorKernel
 #pragma kernel GlobalShearKernel
-#pragma kernel GlobalCopyBufferToTexture
+
 
 #define NUM_THREADS 1024
 // Create a RenderTexture with enableRandomWrite flag and set it
 // with cs.SetTexture
-RWTexture2D<float4> _Result;
+RWTexture2D<float4> _TexOut;
 
 RWStructuredBuffer<float> _Color;
 RWStructuredBuffer<uint> _Index;
@@ -279,6 +279,7 @@ void GlobalShearKernel(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID,
     AllMemoryBarrierWithGroupSync();
 }
 
+/*
 [numthreads(NUM_THREADS, 1, 1)]
 void GlobalCopyBufferToTexture(uint3 id : SV_DispatchThreadID, uint3 group : SV_GroupID, uint thread : SV_GroupIndex)
 {
@@ -288,10 +289,11 @@ void GlobalCopyBufferToTexture(uint3 id : SV_DispatchThreadID, uint3 group : SV_
 
     uint globalIndex = 2 * prevGroupThreads + even;
     uint2 uv = uint2(globalIndex % _TexWidth, globalIndex / _TexWidth);
-    _Result[uv] = float4(_Color[globalIndex], 0, 0, 1);
-    //_Result[uv] = float4(group.x, 0, 0, 1);
+    _TexOut[uv] = float4(_Color[globalIndex], 0, 0, 1);
+    //_TexOut[uv] = float4(group.x, 0, 0, 1);
 
     globalIndex = 2 * prevGroupThreads + odd;
     uv = uint2(globalIndex % _TexWidth, globalIndex / _TexWidth);
-    _Result[uv] = float4(_Color[globalIndex], 0, 0, 1);
+    _TexOut[uv] = float4(_Color[globalIndex], 0, 0, 1);
 }
+*/

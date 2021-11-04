@@ -14,24 +14,56 @@ namespace GaussianTexture
     public RenderTexture TestOutput;
     public RenderTexture TestLUT;
 
+    
+    private static int texInP = Shader.PropertyToID("_TexIn");
+    private static int texIn2P = Shader.PropertyToID("_TexIn2");
+    private static int texOutP = Shader.PropertyToID("_TexOut");
+    private static int redP = Shader.PropertyToID("_Red");
+    private static int greenP = Shader.PropertyToID("_Green");
+    private static int blueP = Shader.PropertyToID("_Blue");
+    private static int alphaP = Shader.PropertyToID("_Alpha");
+    private static int indexRP = Shader.PropertyToID("_IndexR");
+    private static int indexGP = Shader.PropertyToID("_IndexG");
+    private static int indexBP = Shader.PropertyToID("_IndexB");
+    private static int indexAP = Shader.PropertyToID("_IndexA");
+    private static int bufferAvgP = Shader.PropertyToID("_BufferAvg");
+    private static int mipP = Shader.PropertyToID("_Mip");
+    private static int texWidthP = Shader.PropertyToID("_TexWidth");
+    private static int texHeightP = Shader.PropertyToID("_TexHeight");
+    private static int kernelWidthP = Shader.PropertyToID("_KernelWidth");
+    private static int kernelHeightP = Shader.PropertyToID("_KernelHeight");
+    private static int eigenVector1P = Shader.PropertyToID("_EigenVector1");
+    private static int eigenVector2P = Shader.PropertyToID("_EigenVector2");
+    private static int eigenVector3P = Shader.PropertyToID("_EigenVector3");
+    private static int minColorP = Shader.PropertyToID("_MinColor");
+    private static int maxColorP = Shader.PropertyToID("_MaxColor");
+    private static int swizzleMaskP = Shader.PropertyToID("_SwizzleMask");
+
+    private static int colorP = Shader.PropertyToID("_Color");
+    private static int indexP = Shader.PropertyToID("_Index");
+    private static int heightPowerP = Shader.PropertyToID("_HeightPower");
+
+    private static int lutP = Shader.PropertyToID("_LUT");
+    private static int colorMaskP = Shader.PropertyToID("_ColorMask");
+    private static int invAxisLengthsP = Shader.PropertyToID("_InvAxisLengths");
+    private static int lutWidthP = Shader.PropertyToID("_LUTWidth");
+    private static int lutHeightP = Shader.PropertyToID("_LUTHeight");
+
+
     #region PRIVATE_METHODS
 
     /// <summary>
     /// Copies the contents of a texture to a random write enabled rendertexture
     /// </summary>
     /// <param name="TexIn">The texture to copy</param>
-    /// <param name="texInProp">The ID number of the shader property "_TexIn"</param>
     /// <param name="TexOut">The rendertexture to copy the texture to. Must have random write enabled</param>
-    /// <param name="texOutProp">The ID number of the shader property "_TexOut"</param>
-    /// <param name="texWidthProp">The ID number of the shader property "_TexWidth"</param>
-    /// <param name="texHeightProp">The ID number of the shader property "_TexHeight"</param>
-    private void copyImage(Texture TexIn, int texInProp, RenderTexture TexOut, int texOutProp, int texWidthProp, int texHeightProp)
+    private void copyImage(Texture TexIn, RenderTexture TexOut)
     {
       int copyImageKern = TexturePreprocessor.FindKernel("CopyTexture");
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetInt(texHeightProp, TexIn.height);
-      TexturePreprocessor.SetTexture(copyImageKern, texInProp, TexIn);
-      TexturePreprocessor.SetTexture(copyImageKern, texOutProp, TexOut);
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetInt(texHeightP, TexIn.height);
+      TexturePreprocessor.SetTexture(copyImageKern, texInP, TexIn);
+      TexturePreprocessor.SetTexture(copyImageKern, texOutP, TexOut);
       TexturePreprocessor.Dispatch(copyImageKern, Mathf.Max(1, TexIn.width / 32), Mathf.Max(1, TexIn.height / 32), 1);
     }
 
@@ -48,38 +80,45 @@ namespace GaussianTexture
     /// <param name="texOutProp">The shader property ID of _TexOut</param>
     /// <param name="texWidthProp">The shader propertyID of _TexWidth</param>
     /// <param name="texHeightProp">The shader propertyID of _TexHeight</param>
-    void ImageOperation(int operationKernel, RenderTexture tempRT1, RenderTexture tempRT2, ComputeBuffer AvgOut, int avgProp, int texInProp, int texOutProp, int texWidthProp, int texHeightProp)
+    void ImageOperation(int operationKernel, RenderTexture tempRT1, RenderTexture tempRT2, ComputeBuffer AvgOut, int texWidth, int texHeight)
     {
       //int averageKernel = TexturePreprocessor.FindKernel("AverageImage");
-      int texWidth = tempRT1.width;
-      int texHeight = tempRT1.height;
       int kernelWidth = 4;
       int smallestDim = Mathf.Min(texWidth, texHeight);
 
-      int kernWidthP = Shader.PropertyToID("_KernelWidth");
-      int kernHeightP = Shader.PropertyToID("_KernelHeight");
-
-      TexturePreprocessor.SetInt(kernWidthP, kernelWidth);
-      TexturePreprocessor.SetInt(kernHeightP, kernelWidth);
-      TexturePreprocessor.SetBuffer(operationKernel, avgProp, AvgOut);
+      TexturePreprocessor.SetInt(kernelWidthP, kernelWidth);
+      TexturePreprocessor.SetInt(kernelHeightP, kernelWidth);
+      TexturePreprocessor.SetBuffer(operationKernel, bufferAvgP, AvgOut);
 
       bool oddStep = false;
+
+      if (texWidth * texHeight == 1)
+      {
+        TexturePreprocessor.SetTexture(operationKernel, texInP, tempRT2);
+        TexturePreprocessor.SetTexture(operationKernel, texOutP, tempRT1);
+      
+        TexturePreprocessor.SetInt(kernelWidthP, texWidth);
+        TexturePreprocessor.SetInt(kernelHeightP, texHeight);
+        TexturePreprocessor.SetInt(texWidthP, texWidth);
+        TexturePreprocessor.SetInt(texHeightP, texHeight);
+        TexturePreprocessor.Dispatch(operationKernel, 1, 1, 1);
+      }
 
       for (int i = smallestDim; i >= kernelWidth; i /= kernelWidth)
       {
         if (oddStep == true)
         {
-          TexturePreprocessor.SetTexture(operationKernel, texInProp, tempRT2);
-          TexturePreprocessor.SetTexture(operationKernel, texOutProp, tempRT1);
+          TexturePreprocessor.SetTexture(operationKernel, texInP, tempRT2);
+          TexturePreprocessor.SetTexture(operationKernel, texOutP, tempRT1);
         }
         else
         {
-          TexturePreprocessor.SetTexture(operationKernel, texInProp, tempRT1);
-          TexturePreprocessor.SetTexture(operationKernel, texOutProp, tempRT2);
+          TexturePreprocessor.SetTexture(operationKernel, texInP, tempRT1);
+          TexturePreprocessor.SetTexture(operationKernel, texOutP, tempRT2);
         }
 
-        TexturePreprocessor.SetInt(texWidthProp, texWidth);
-        TexturePreprocessor.SetInt(texHeightProp, texHeight);
+        TexturePreprocessor.SetInt(texWidthP, texWidth);
+        TexturePreprocessor.SetInt(texHeightP, texHeight);
         TexturePreprocessor.Dispatch(operationKernel, Mathf.Max(texWidth * texHeight / 1024, 1), 1, 1);
 
         oddStep = !oddStep;
@@ -91,18 +130,18 @@ namespace GaussianTexture
       {
         if (oddStep == true)
         {
-          TexturePreprocessor.SetTexture(operationKernel, texInProp, tempRT2);
-          TexturePreprocessor.SetTexture(operationKernel, texOutProp, tempRT1);
+          TexturePreprocessor.SetTexture(operationKernel, texInP, tempRT2);
+          TexturePreprocessor.SetTexture(operationKernel, texOutP, tempRT1);
         }
         else
         {
-          TexturePreprocessor.SetTexture(operationKernel, texInProp, tempRT1);
-          TexturePreprocessor.SetTexture(operationKernel, texOutProp, tempRT2);
+          TexturePreprocessor.SetTexture(operationKernel, texInP, tempRT1);
+          TexturePreprocessor.SetTexture(operationKernel, texOutP, tempRT2);
         }
-        TexturePreprocessor.SetInt(kernWidthP, texWidth);
-        TexturePreprocessor.SetInt(kernHeightP, texHeight);
-        TexturePreprocessor.SetInt(texWidthProp, texWidth);
-        TexturePreprocessor.SetInt(texHeightProp, texHeight);
+        TexturePreprocessor.SetInt(kernelWidthP, texWidth);
+        TexturePreprocessor.SetInt(kernelHeightP, texHeight);
+        TexturePreprocessor.SetInt(texWidthP, texWidth);
+        TexturePreprocessor.SetInt(texHeightP, texHeight);
         TexturePreprocessor.Dispatch(operationKernel, 1, 1, 1);
       }
     }
@@ -203,15 +242,7 @@ namespace GaussianTexture
     /// <param name="ColorCenter">Center of the transformed colorspace in RGB space</param>
     void ComputeDecorrelatedColorSpace(RenderTexture TexIn, ref Vector4 Axis0, ref Vector4 Axis1, ref Vector4 Axis2, ref Vector4 ColorCenter)
     {
-      /*
-       * Find the ID values of several shader properties. Even though we already found them in the method that calls this one, it isn't worth the pain
-       * in the ass of passing all the integer IDs as parameters so we'll just do it again.
-       */
-      int texInProp = Shader.PropertyToID("_TexIn");
-      int texOutProp = Shader.PropertyToID("_TexOut");
-      int texWidthProp = Shader.PropertyToID("_TexWidth");
-      int texHeightProp = Shader.PropertyToID("_TexHeight");
-      int AvgColorProp = Shader.PropertyToID("_BufferAvg");
+
 
       /*
        * Create some small compute buffers to store the outputs of
@@ -236,8 +267,11 @@ namespace GaussianTexture
       tempRT2.enableRandomWrite = true;
       tempRT2.Create();
 
+      int texWidth = tempRT1.width;
+      int texHeight = tempRT1.height;
+
       // Copy the image into the first temp rendertexture. Don't use the input image directly as both temp images get modified by the compute shader.
-      copyImage(TexIn, texInProp, tempRT1, texOutProp, texWidthProp, texHeightProp);
+      copyImage(TexIn, tempRT1);
 
 
       /*----------------------------------------------------------------------------------------------------------------------------
@@ -247,7 +281,7 @@ namespace GaussianTexture
 
       // Start by finding the average of each color channel in the image
       int averageKernel = TexturePreprocessor.FindKernel("AverageImage");
-      ImageOperation(averageKernel, tempRT1, tempRT2, AvgColor, AvgColorProp, texInProp, texOutProp, texWidthProp, texHeightProp);
+      ImageOperation(averageKernel, tempRT1, tempRT2, AvgColor, texWidth, texHeight);
 
       /* The super-diagonal elements of the covariance matrix follow the form:
        * 
@@ -257,11 +291,11 @@ namespace GaussianTexture
        * and (red - red average) * (blue - blue average) at each pixel and store the values in the RGB channels of each pixel
        */
       int CovUpperKern = TexturePreprocessor.FindKernel("ImageCovUpper");
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetInt(texHeightProp, TexIn.width);
-      TexturePreprocessor.SetTexture(CovUpperKern, texInProp, TexIn);
-      TexturePreprocessor.SetTexture(CovUpperKern, texOutProp, tempRT1);
-      TexturePreprocessor.SetBuffer(CovUpperKern, AvgColorProp, AvgColor);
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetInt(texHeightP, TexIn.width);
+      TexturePreprocessor.SetTexture(CovUpperKern, texInP, TexIn);
+      TexturePreprocessor.SetTexture(CovUpperKern, texOutP, tempRT1);
+      TexturePreprocessor.SetBuffer(CovUpperKern, bufferAvgP, AvgColor);
       TexturePreprocessor.Dispatch(CovUpperKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
 
       /*
@@ -269,7 +303,7 @@ namespace GaussianTexture
        * total number of pixels we should have divided by the total number of pixels - 1. This is easily solved by multiplying by
        * (total number of pixels) / (total number of pixels - 1)
        */
-      ImageOperation(averageKernel, tempRT1, tempRT2, CovUpperBuffer, AvgColorProp, texInProp, texOutProp, texWidthProp, texHeightProp);
+      ImageOperation(averageKernel, tempRT1, tempRT2, CovUpperBuffer, texWidth, texHeight);
       float[] covUpperArray = new float[4];
 
       CovUpperBuffer.GetData(covUpperArray);
@@ -283,13 +317,13 @@ namespace GaussianTexture
        * (1/number of pixels) * sum( (color - average color)^2 ) 
        */
       int CovDiagonalKern = TexturePreprocessor.FindKernel("ImageCovDiagonal");
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetInt(texHeightProp, TexIn.width);
-      TexturePreprocessor.SetTexture(CovDiagonalKern, texInProp, TexIn);
-      TexturePreprocessor.SetTexture(CovDiagonalKern, texOutProp, tempRT1);
-      TexturePreprocessor.SetBuffer(CovDiagonalKern, AvgColorProp, AvgColor);
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetInt(texHeightP, TexIn.width);
+      TexturePreprocessor.SetTexture(CovDiagonalKern, texInP, TexIn);
+      TexturePreprocessor.SetTexture(CovDiagonalKern, texOutP, tempRT1);
+      TexturePreprocessor.SetBuffer(CovDiagonalKern, bufferAvgP, AvgColor);
       TexturePreprocessor.Dispatch(CovDiagonalKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
-      ImageOperation(averageKernel, tempRT1, tempRT2, CovDiagonalBuffer, AvgColorProp, texInProp, texOutProp, texWidthProp, texHeightProp);
+      ImageOperation(averageKernel, tempRT1, tempRT2, CovDiagonalBuffer, texWidth, texHeight);
       float[] covDiagArray = new float[4];
       CovDiagonalBuffer.GetData(covDiagArray);
       // We divided by N instead of N-1 when we averaged, so multiply by N/(N-1)
@@ -348,29 +382,27 @@ namespace GaussianTexture
       //Transform the colors of the input image to the new colorspace with the eigenvectors as the basis vectors
 
       int toEigenKern = TexturePreprocessor.FindKernel("TransformColorsToEigenSpace");
-      int _ev1Prop = Shader.PropertyToID("_EigenVector1");
-      int _ev2Prop = Shader.PropertyToID("_EigenVector2");
-      int _ev3Prop = Shader.PropertyToID("_EigenVector3");
-      TexturePreprocessor.SetFloats(_ev1Prop, new float[4] { eigen0.x, eigen0.y, eigen0.z, 0.0f });
-      TexturePreprocessor.SetFloats(_ev2Prop, new float[4] { eigen1.x, eigen1.y, eigen1.z, 0.0f });
-      TexturePreprocessor.SetFloats(_ev3Prop, new float[4] { eigen2.x, eigen2.y, eigen2.z, 0.0f });
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetTexture(toEigenKern, texOutProp, TexIn);
+
+      TexturePreprocessor.SetFloats(eigenVector1P, new float[4] { eigen0.x, eigen0.y, eigen0.z, 0.0f });
+      TexturePreprocessor.SetFloats(eigenVector2P, new float[4] { eigen1.x, eigen1.y, eigen1.z, 0.0f });
+      TexturePreprocessor.SetFloats(eigenVector3P, new float[4] { eigen2.x, eigen2.y, eigen2.z, 0.0f });
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetTexture(toEigenKern, texOutP, TexIn);
       TexturePreprocessor.Dispatch(toEigenKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
 
       // Find the minimum values of the image in the new colorspace
 
-      copyImage(TexIn, texInProp, tempRT1, texOutProp, texWidthProp, texHeightProp);
+      copyImage(TexIn, tempRT1);
       int minKern = TexturePreprocessor.FindKernel("MinImage");
-      ImageOperation(minKern, tempRT1, tempRT2, MinColor, AvgColorProp, texInProp, texOutProp, texWidthProp, texHeightProp);
+      ImageOperation(minKern, tempRT1, tempRT2, MinColor, texWidth, texHeight);
       float[] minColors = new float[4];
       MinColor.GetData(minColors);
 
       // Find the maximum values of the image in the new colorspace
 
-      copyImage(TexIn, texInProp, tempRT1, texOutProp, texWidthProp, texHeightProp);
+      copyImage(TexIn, tempRT1);
       int maxKern = TexturePreprocessor.FindKernel("MaxImage");
-      ImageOperation(maxKern, tempRT1, tempRT2, MaxColor, AvgColorProp, texInProp, texOutProp, texWidthProp, texHeightProp);
+      ImageOperation(maxKern, tempRT1, tempRT2, MaxColor, texWidth, texHeight);
       float[] maxColors = new float[4];
       MaxColor.GetData(maxColors);
 
@@ -384,10 +416,9 @@ namespace GaussianTexture
 
       int[] SwizzleMask = SortAxis(ref eigen0, ref eigen1, ref eigen2, ref length0, ref length1, ref length2, ref minColors, ref maxColors);
       int swizzleKern = TexturePreprocessor.FindKernel("SwizzleColors");
-      int swizzleMaskProp = Shader.PropertyToID("_SwizzleMask");
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetTexture(swizzleKern, texOutProp, TexIn);
-      TexturePreprocessor.SetInts(swizzleMaskProp, SwizzleMask);
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetTexture(swizzleKern, texOutP, TexIn);
+      TexturePreprocessor.SetInts(swizzleMaskP, SwizzleMask);
       TexturePreprocessor.Dispatch(swizzleKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
       Debug.Log(string.Format("Swizzle Mask: {0}, {1}, {2}, {3}", SwizzleMask[0], SwizzleMask[1], SwizzleMask[2], SwizzleMask[3]));
 
@@ -398,12 +429,10 @@ namespace GaussianTexture
       Vector3 center = minColors[0] * eigen0 + minColors[1] * eigen1 + minColors[2] * eigen2;
 
       int toBoundsKern = TexturePreprocessor.FindKernel("TransformColorsToBoundingBox");
-      int minColorProp = Shader.PropertyToID("_MinColor");
-      int maxColorProp = Shader.PropertyToID("_MaxColor");
-      TexturePreprocessor.SetFloats(minColorProp, minColors);
-      TexturePreprocessor.SetFloats(maxColorProp, maxColors);
-      TexturePreprocessor.SetInt(texWidthProp, TexIn.width);
-      TexturePreprocessor.SetTexture(toBoundsKern, texOutProp, TexIn);
+      TexturePreprocessor.SetFloats(minColorP, minColors);
+      TexturePreprocessor.SetFloats(maxColorP, maxColors);
+      TexturePreprocessor.SetInt(texWidthP, TexIn.width);
+      TexturePreprocessor.SetTexture(toBoundsKern, texOutP, TexIn);
       TexturePreprocessor.Dispatch(toBoundsKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
 
       
@@ -433,23 +462,23 @@ namespace GaussianTexture
     }
 
 
-    void SortBuffer(ComputeBuffer colorBuffer, int colorProperty, ComputeBuffer indexBuffer, int indexProperty, int texWidth, int widthProperty, int texHeight, int heightProperty, int hPowP)
+    void SortBuffer(ComputeBuffer colorBuffer, ComputeBuffer indexBuffer, int texWidth, int texHeight)
     {
       int bitonicLocalFullKern = BitonicSort.FindKernel("LocalFullSortKernel");
-      BitonicSort.SetBuffer(bitonicLocalFullKern, colorProperty, colorBuffer);
-      BitonicSort.SetBuffer(bitonicLocalFullKern, indexProperty, indexBuffer);
+      BitonicSort.SetBuffer(bitonicLocalFullKern, colorP, colorBuffer);
+      BitonicSort.SetBuffer(bitonicLocalFullKern, indexP, indexBuffer);
       int bitonicLocalShearKern = BitonicSort.FindKernel("LocalShearKernel");
-      BitonicSort.SetBuffer(bitonicLocalShearKern, colorProperty, colorBuffer);
-      BitonicSort.SetBuffer(bitonicLocalShearKern, indexProperty, indexBuffer);
+      BitonicSort.SetBuffer(bitonicLocalShearKern, colorP, colorBuffer);
+      BitonicSort.SetBuffer(bitonicLocalShearKern, indexP, indexBuffer);
       int bitonicGlobalMirrorKern = BitonicSort.FindKernel("GlobalMirrorKernel");
-      BitonicSort.SetBuffer(bitonicGlobalMirrorKern, colorProperty, colorBuffer);
-      BitonicSort.SetBuffer(bitonicGlobalMirrorKern, indexProperty, indexBuffer);
+      BitonicSort.SetBuffer(bitonicGlobalMirrorKern, colorP, colorBuffer);
+      BitonicSort.SetBuffer(bitonicGlobalMirrorKern, indexP, indexBuffer);
       int bitonicGlobalShearKern = BitonicSort.FindKernel("GlobalShearKernel");
-      BitonicSort.SetBuffer(bitonicGlobalShearKern, colorProperty, colorBuffer);
-      BitonicSort.SetBuffer(bitonicGlobalShearKern, indexProperty, indexBuffer);
+      BitonicSort.SetBuffer(bitonicGlobalShearKern, colorP, colorBuffer);
+      BitonicSort.SetBuffer(bitonicGlobalShearKern, indexP, indexBuffer);
 
-      BitonicSort.SetInt(widthProperty, texWidth);
-      BitonicSort.SetInt(heightProperty, texHeight);
+      BitonicSort.SetInt(texWidthP, texWidth);
+      BitonicSort.SetInt(texHeightP, texHeight);
 
       int numElements = texWidth * texHeight;
       int numGroups = Mathf.Max(1, numElements / 1024);
@@ -462,14 +491,14 @@ namespace GaussianTexture
                             //uint height = 2048;
       for (uint height = 2048; height <= numElements; height *= 2)
       {
-        BitonicSort.SetInt(hPowP, heightPower);
+        BitonicSort.SetInt(heightPowerP, heightPower);
         BitonicSort.Dispatch(bitonicGlobalMirrorKern, numGroups, 1, 1);
 
         int height2Power = heightPower - 1;
         //uint height2 = height / 2;
         for (uint height2 = height / 2; height2 >= 2; height2 /= 2)
         {
-          BitonicSort.SetInt(hPowP, height2Power);
+          BitonicSort.SetInt(heightPowerP, height2Power);
           if (height2 <= 1024)
           {
             BitonicSort.Dispatch(bitonicLocalShearKern, numGroups, 1, 1);
@@ -485,6 +514,249 @@ namespace GaussianTexture
         heightPower += 1;
       }
     }
+
+    
+    private void averageBlock(RenderTexture temp1, RenderTexture temp2, ComputeBuffer averageBuffer,
+      int kernel, int texWidth, int texHeight, int kernelWidth, int blockWidth, ref bool oddStep)
+    {
+      TexturePreprocessor.SetInt(kernelWidthP, kernelWidth);
+      TexturePreprocessor.SetInt(kernelHeightP, kernelWidth);
+      TexturePreprocessor.SetBuffer(kernel, bufferAvgP, averageBuffer);
+
+      int i = blockWidth;
+      int j = 0;
+      
+      while (i >= kernelWidth)
+      {
+        j++;
+        if (oddStep == true)
+        {
+          TexturePreprocessor.SetTexture(kernel, texInP, temp2);
+          TexturePreprocessor.SetTexture(kernel, texOutP, temp1);
+        }
+        else
+        {
+          TexturePreprocessor.SetTexture(kernel, texInP, temp1);
+          TexturePreprocessor.SetTexture(kernel, texOutP, temp2);
+        }
+
+        TexturePreprocessor.SetInt(texWidthP, texWidth);
+        TexturePreprocessor.SetInt(texHeightP, texHeight);
+        TexturePreprocessor.Dispatch(kernel, Mathf.Max(texWidth * texHeight / 1024, 1), 1, 1);
+
+        oddStep = !oddStep;
+        texWidth /= kernelWidth;
+        texHeight /= kernelWidth;
+        i /= kernelWidth;
+        if (i < kernelWidth && i != 1)
+        {
+          kernelWidth = i;
+          TexturePreprocessor.SetInt(kernelWidthP, kernelWidth);
+          TexturePreprocessor.SetInt(kernelHeightP, kernelWidth);
+        }
+      }
+      Debug.Log("Ran block average for: " + j.ToString());
+    }
+
+    /// <summary>
+    /// Calculates the average variance of 2^mipLevel blocks of pixels of the input image
+    /// </summary>
+    /// <param name="TexIn">Input texture to calculate the variance of</param>
+    /// <param name="temp1">Temporary rendertexture, should be the same dimensions as TexIn and have random write enabled</param>
+    /// <param name="temp2">Temporary rendertexture, should be at least half the dimensions of TexIn and have random write enabled</param>
+    /// <param name="temp3">Temporary rendertexture, should be at least half the dimensions of TexIn and have random write enabled</param>
+    /// <param name="avgOut">Compute buffer of size 4,4 into which the variance array will be output from the compute shaders</param>
+    /// <param name="mipLevel">Mip level to calculate the variance of</param>
+    /// <param name="varKernRG">Integer ID of the kernel "PopulateRGVariance"</param>
+    /// <param name="varKernBA">Integer ID of the kernel "PopulateBAVariance"</param>
+    /// <param name="varKern">Integer ID of the kernel "CalculateVariance"</param>
+    /// <param name="avgKern">Integer ID of the kernel "AverageImage"</param>
+    /// <returns>Vector4 containing the average variance of the R, G, B, and A channels</returns>
+    private Vector4 CalculateMipVariance(Texture TexIn, RenderTexture temp1, RenderTexture temp2, RenderTexture temp3,
+      ComputeBuffer avgOut, int mipLevel, int varKernRG, int varKernBA, int varKern, int avgKern)
+    {
+      int texWidth = TexIn.width;
+      int texHeight = TexIn.height;
+      int mipWidth = texWidth >> mipLevel;
+      int mipHeight = texHeight >> mipLevel;
+
+
+      float[] rgVarArray = new float[4];
+      float[] baVarArray = new float[4];
+      float[] varArray = new float[4];
+
+      TexturePreprocessor.SetInt(texWidthP, texWidth);
+      TexturePreprocessor.SetInt(texHeightP, texHeight);
+      TexturePreprocessor.SetTexture(varKernRG, texInP, TexIn);
+      TexturePreprocessor.SetTexture(varKernRG, texOutP, temp1);
+      TexturePreprocessor.Dispatch(varKernRG, Mathf.Max(1, texWidth / 32), Mathf.Max(1, texHeight / 32), 1);
+      int blockWidth = 1 << mipLevel;
+
+      int kernelWidth = mipLevel > 1 ? 4 : 2;
+      bool oddStep = false;
+
+      averageBlock(temp1, temp2, avgOut, avgKern, texWidth, texHeight, kernelWidth, blockWidth, ref oddStep);
+
+      if (!oddStep)
+      {
+        copyImage(temp1, temp2);
+      }
+
+      if (mipWidth == 1 && mipHeight == 1)
+      {
+        avgOut.GetData(rgVarArray);
+      }
+
+      TexturePreprocessor.SetInt(texWidthP, texWidth);
+      TexturePreprocessor.SetInt(texHeightP, texHeight);
+      TexturePreprocessor.SetTexture(varKernBA, texInP, TexIn);
+      TexturePreprocessor.SetTexture(varKernBA, texOutP, temp1);
+      TexturePreprocessor.Dispatch(varKernBA, Mathf.Max(1, texWidth / 32), Mathf.Max(1, texHeight / 32), 1);
+
+
+      kernelWidth = mipLevel > 1 ? 4 : 2;
+      oddStep = false;
+
+      averageBlock(temp1, temp3, avgOut, avgKern, texWidth, texHeight, kernelWidth, blockWidth, ref oddStep);
+
+      if (!oddStep)
+      {
+        copyImage(temp1, temp3);
+      }
+
+      if (mipWidth == 1 && mipHeight == 1)
+      {
+        avgOut.GetData(baVarArray);
+      }
+
+      if (mipWidth == 1 && mipHeight == 1)
+      {
+        varArray[0] = rgVarArray[1] - rgVarArray[0] * rgVarArray[0];
+        varArray[1] = rgVarArray[3] - rgVarArray[2] * rgVarArray[2];
+        varArray[2] = baVarArray[1] - baVarArray[0] * baVarArray[0];
+        varArray[3] = baVarArray[1] - baVarArray[2] * baVarArray[2];
+      }
+      else
+      {
+        TexturePreprocessor.SetInt(texWidthP, mipWidth);
+        TexturePreprocessor.SetInt(texHeightP, mipHeight);
+        TexturePreprocessor.SetTexture(varKern, texInP, temp2);
+        TexturePreprocessor.SetTexture(varKern, texIn2P, temp3);
+        TexturePreprocessor.SetTexture(varKern, texOutP, temp1);
+        TexturePreprocessor.Dispatch(varKern, Mathf.Max(1, mipWidth / 32), Mathf.Max(1, mipHeight / 32), 1);
+        ImageOperation(avgKern, temp1, temp2, avgOut, mipWidth, mipHeight);
+        avgOut.GetData(varArray);
+      }
+      return new Vector4(varArray[0], varArray[1], varArray[2], varArray[3]);
+    }
+
+    
+    Vector4 ComputeLODAverageSubpixelVariance(RenderTexture TexIn, int LOD)
+    {
+      RenderTexture active = RenderTexture.active;
+      Texture2D temp = new Texture2D(TexIn.width, TexIn.height, TextureFormat.RGBAFloat, false);
+      RenderTexture.active = TexIn;
+      temp.ReadPixels(new Rect(0, 0, TexIn.width, TexIn.height), 0, 0);
+      temp.Apply();
+      RenderTexture.active = active;
+      // Window width associated with
+      int windowWidth = 1 << LOD;
+
+      // Compute average variance in all the windows
+      double[] average_window_variance = new double[4] { 0.0, 0.0, 0.0, 0.0 };
+
+      // Loop over al the windows
+      for (int window_y = 0; window_y < TexIn.height; window_y += windowWidth)
+        for (int window_x = 0; window_x < TexIn.width; window_x += windowWidth)
+        {
+          // Estimate variance of current window
+          double[] v = new double[4] { 0.0, 0.0, 0.0, 0.0 };
+          double[] v2 = new double[4] { 0.0, 0.0, 0.0, 0.0 };
+          for (int y = 0; y < windowWidth; y++)
+            for (int x = 0; x < windowWidth; x++)
+            {
+              Vector4 value = temp.GetPixel(window_x + x, window_y + y);
+              v[0] = v[0] + value.x;
+              v[1] = v[1] + value.y;
+              v[2] = v[2] + value.z;
+              v[3] = v[3] + value.w;
+              v2[0] = v2[0] + value.x * value.x;
+              v2[1] = v2[1] + value.y * value.y;
+              v2[2] = v2[2] + value.z * value.z;
+              v2[3] = v2[3] + value.w * value.w;
+            }
+          v[0] /= (windowWidth * windowWidth);
+          v[1] /= (windowWidth * windowWidth);
+          v[2] /= (windowWidth * windowWidth);
+          v[3] /= (windowWidth * windowWidth);
+          v2[0] /= (windowWidth * windowWidth);
+          v2[1] /= (windowWidth * windowWidth);
+          v2[2] /= (windowWidth * windowWidth);
+          v2[3] /= (windowWidth * windowWidth);
+          double[] window_variance = new double[4]{
+            System.Math.Max(0.0, v2[0] - v[0]*v[0]),
+            System.Math.Max(0.0, v2[1] - v[1]*v[1]),
+            System.Math.Max(0.0, v2[2] - v[2]*v[2]),
+            System.Math.Max(0.0, v2[3] - v[3]*v[3])
+          };
+          if (window_x == 0 && window_y == 0)
+          {
+            Debug.Log(string.Format("CPU First Block Var: {0}, {1}, {2}, {3}", v[0], v2[0], v[1], v2[1]));
+          }
+          // Update average
+          average_window_variance[0] += window_variance[0] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
+          average_window_variance[1] += window_variance[1] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
+          average_window_variance[2] += window_variance[2] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
+          average_window_variance[3] += window_variance[3] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
+        }
+
+      return new Vector4((float)average_window_variance[0], (float)average_window_variance[1], (float)average_window_variance[2], (float)average_window_variance[3]);
+    }
+   
+    private void FilterLUT(RenderTexture TexIn)
+    {
+      int texWidth = TexIn.width;
+      int texHeight = TexIn.height;
+      int mipLevels = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2));
+
+      int varKernRG = TexturePreprocessor.FindKernel("PopulateRGVariance");
+      int varKernBA = TexturePreprocessor.FindKernel("PopulateBAVariance");
+      int varKern = TexturePreprocessor.FindKernel("CalculateVariance");
+      int avgKern = TexturePreprocessor.FindKernel("AverageImage");
+
+      RenderTexture temp1 = new RenderTexture(texWidth, texHeight, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      temp1.enableRandomWrite = true;
+      temp1.Create();
+      RenderTexture temp2 = new RenderTexture(texWidth >> 1, texHeight >> 1, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      temp2.enableRandomWrite = true;
+      temp2.Create();
+      RenderTexture temp3 = new RenderTexture(texWidth >> 1, texHeight >> 1, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      temp3.enableRandomWrite = true;
+      temp3.Create();
+      ComputeBuffer avgOut = new ComputeBuffer(4, 4);
+
+      //for (int i = 1; i <= mipLevels; i++)
+      //{
+        Vector4 variance = CalculateMipVariance(TexIn, temp1, temp2, temp3, avgOut, 10, varKernRG, varKernBA, varKern, avgKern);
+
+      //}
+
+
+      
+      UnityEngine.Profiling.Profiler.BeginSample("CPU Variant");
+      Vector4 variance2 = ComputeLODAverageSubpixelVariance(TexIn, 10);
+      UnityEngine.Profiling.Profiler.EndSample();
+      
+      Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance.x, variance.y, variance.z, variance.w));
+      Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance2.x, variance2.y, variance2.z, variance2.w));
+      
+
+      avgOut.Release();
+      temp1.Release();
+      temp2.Release();
+      temp3.Release();
+    }
+    
 
     private bool NoAlphaFormat(TextureFormat format)
     {
@@ -555,8 +827,13 @@ namespace GaussianTexture
     /// <param name="outputImageDir">Output directory to save the gaussian image to. If not specified, saves the image next to the input image. Files are given the input's name plus an extension like "_gauss"</param>
     public void CreateGaussianTexture(Texture2D InputTex, int LUTWidthPow2, int LUTHeightPow2, bool CompressionCorrection = true, bool DecorrelateColorspace = true, string outputImageDir = null)
     {
+
+      int texWidth = InputTex.width;
+      int texHeight = InputTex.height;
+
       int LUTWidth = 1 << Mathf.Clamp(LUTWidthPow2, 1, 5);
       int LUTHeight = 1 << Mathf.Clamp(LUTHeightPow2, 1, 5);
+      int LUTDepth = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2));
       /* First check if the input texture has power of 2 dimensions. The gpu bitonic merge sort
        * algorithm I'm using only works with power of 2 data sets, so we can't convert NPOT images
        */
@@ -567,21 +844,6 @@ namespace GaussianTexture
         Debug.LogError(string.Format("Cannot convert textures with non-power of 2 dimensions, input texture is {0} by {1}", testWidth, testHeight));
         return;
       }
-
-
-      // Find the propery ID numbers of some common properties so we don't have to constantly look them up every time a compute shader needs one of them set
-      int widthP = Shader.PropertyToID("_TexWidth"), heightP = Shader.PropertyToID("_TexHeight");
-      int hPowP = Shader.PropertyToID("_HeightPower");
-
-      int texP = Shader.PropertyToID("_TexIn"), texOutP = Shader.PropertyToID("_TexOut"), mipP = Shader.PropertyToID("_Mip"),
-        rP = Shader.PropertyToID("_Red"), gP = Shader.PropertyToID("_Green"), bP = Shader.PropertyToID("_Blue"), aP = Shader.PropertyToID("_Alpha"),
-        rIP = Shader.PropertyToID("_IndexR"), gIP = Shader.PropertyToID("_IndexG"), bIP = Shader.PropertyToID("_IndexB"), aIP = Shader.PropertyToID("_IndexA"),
-        bufAvgP = Shader.PropertyToID("_BufferAvg");
-
-      int resultP = Shader.PropertyToID("_Result"), colorP = Shader.PropertyToID("_Color"), indexP = Shader.PropertyToID("_Index"), colorMaskP = Shader.PropertyToID("_ColorMask");
-
-      int texWidth = InputTex.width;
-      int texHeight = InputTex.height;
 
       /*
        * Figure out if our image has an alpha channel
@@ -594,13 +856,14 @@ namespace GaussianTexture
       RenderTexture tempOutRT = new RenderTexture(texWidth, texHeight, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
       tempOutRT.enableRandomWrite = true;
       tempOutRT.Create();
-      RenderTexture tempLUTRT = new RenderTexture(LUTWidth, LUTHeight, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      RenderTexture tempLUTRT = new RenderTexture(LUTWidth, LUTHeight, LUTDepth, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      tempLUTRT.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
       tempLUTRT.enableRandomWrite = true;
       tempLUTRT.Create();
 
 
       //Graphics.Blit(InputTex, tempOutRT);
-      copyImage(InputTex, texP, tempOutRT, texOutP, widthP, heightP);
+      copyImage(InputTex, tempOutRT);
 
       /* Transform the colors in the image to multiples of the Eigenvectors of the image's covarience matrix.
        * Essentially makes it so the values stored in the image aren't correlated with each other, so upon 
@@ -651,18 +914,18 @@ namespace GaussianTexture
        * colors and all four index buffers
        */
       int spKern = TexturePreprocessor.FindKernel("SplitTextureAndIndex");
-      TexturePreprocessor.SetTexture(spKern, texP, tempOutRT);
-      TexturePreprocessor.SetBuffer(spKern, rP, _r);
-      TexturePreprocessor.SetBuffer(spKern, gP, _g);
-      TexturePreprocessor.SetBuffer(spKern, bP, _b);
-      TexturePreprocessor.SetBuffer(spKern, aP, _a);
-      TexturePreprocessor.SetBuffer(spKern, rIP, _rI);
-      TexturePreprocessor.SetBuffer(spKern, gIP, _gI);
-      TexturePreprocessor.SetBuffer(spKern, bIP, _bI);
-      TexturePreprocessor.SetBuffer(spKern, aIP, _aI);
+      TexturePreprocessor.SetTexture(spKern, texInP, tempOutRT);
+      TexturePreprocessor.SetBuffer(spKern, redP, _r);
+      TexturePreprocessor.SetBuffer(spKern, greenP, _g);
+      TexturePreprocessor.SetBuffer(spKern, blueP, _b);
+      TexturePreprocessor.SetBuffer(spKern, alphaP, _a);
+      TexturePreprocessor.SetBuffer(spKern, indexRP, _rI);
+      TexturePreprocessor.SetBuffer(spKern, indexGP, _gI);
+      TexturePreprocessor.SetBuffer(spKern, indexBP, _bI);
+      TexturePreprocessor.SetBuffer(spKern, indexAP, _aI);
       TexturePreprocessor.SetInt(mipP, 0);
-      TexturePreprocessor.SetInt(widthP, texWidth);
-      TexturePreprocessor.SetInt(heightP, texHeight);
+      TexturePreprocessor.SetInt(texWidthP, texWidth);
+      TexturePreprocessor.SetInt(texHeightP, texHeight);
       TexturePreprocessor.Dispatch(spKern, texWidth * texHeight / 1024, 1, 1);
 
       //Debug.Log("Successfully Split Texture");
@@ -672,12 +935,12 @@ namespace GaussianTexture
        * https://poniesandlight.co.uk/reflect/bitonic_merge_sort/
        */
 
-      SortBuffer(_r, colorP, _rI, indexP, texWidth, widthP, texHeight, heightP, hPowP);
-      SortBuffer(_g, colorP, _gI, indexP, texWidth, widthP, texHeight, heightP, hPowP);
-      SortBuffer(_b, colorP, _bI, indexP, texWidth, widthP, texHeight, heightP, hPowP);
+      SortBuffer(_r, _rI, texWidth, texHeight);
+      SortBuffer(_g, _gI, texWidth, texHeight);
+      SortBuffer(_b, _bI, texWidth, texHeight);
       if (!NoAlpha)
       {
-        SortBuffer(_a, colorP, _aI, indexP, texWidth, widthP, texHeight, heightP, hPowP);
+        SortBuffer(_a, _aI, texWidth, texHeight);
       }
 
       /*
@@ -692,8 +955,8 @@ namespace GaussianTexture
 
       int InvCDFKernel = CumulativeDistribution.FindKernel("CreateInvCDFTexture");
 
-      CumulativeDistribution.SetInt(widthP, texWidth);
-      CumulativeDistribution.SetInt(heightP, texHeight);
+      CumulativeDistribution.SetInt(texWidthP, texWidth);
+      CumulativeDistribution.SetInt(texHeightP, texHeight);
 
       CumulativeDistribution.SetTexture(InvCDFKernel, texOutP, tempOutRT);
 
@@ -722,7 +985,7 @@ namespace GaussianTexture
       {
         float[] invAxisLengths = new float[4] {1.0f / axis0.w, 1.0f / axis1.w, 1.0f / axis2.w, 1};
         int compCorrKern = CumulativeDistribution.FindKernel("CompressionCorrection");
-        CumulativeDistribution.SetFloats("_InvAxisLengths", invAxisLengths);
+        CumulativeDistribution.SetFloats(invAxisLengthsP, invAxisLengths);
         CumulativeDistribution.SetTexture(compCorrKern, texOutP, tempOutRT);
         CumulativeDistribution.Dispatch(compCorrKern, Mathf.Max(1, InputTex.width / 32), Mathf.Max(1, InputTex.height / 32), 1);
       }
@@ -733,14 +996,17 @@ namespace GaussianTexture
        */
 
       int LUTKernel = CumulativeDistribution.FindKernel("CreateLookupTable");
-      CumulativeDistribution.SetTexture(LUTKernel, texOutP, tempLUTRT);
-      CumulativeDistribution.SetBuffer(LUTKernel, rP, _r);
-      CumulativeDistribution.SetBuffer(LUTKernel, gP, _g);
-      CumulativeDistribution.SetBuffer(LUTKernel, bP, _b);
-      CumulativeDistribution.SetBuffer(LUTKernel, aP, _a);
-      CumulativeDistribution.SetInt("_LUTWidth", LUTWidth);
-      CumulativeDistribution.SetInt("_LUTHeight", LUTHeight);
+      CumulativeDistribution.SetTexture(LUTKernel, lutP, tempLUTRT);
+      CumulativeDistribution.SetBuffer(LUTKernel, redP, _r);
+      CumulativeDistribution.SetBuffer(LUTKernel, greenP, _g);
+      CumulativeDistribution.SetBuffer(LUTKernel, blueP, _b);
+      CumulativeDistribution.SetBuffer(LUTKernel, alphaP, _a);
+      CumulativeDistribution.SetInt(lutWidthP, LUTWidth);
+      CumulativeDistribution.SetInt(lutHeightP, LUTHeight);
       CumulativeDistribution.Dispatch(LUTKernel, 1, 1, 1);
+
+      FilterLUT(tempOutRT);
+
 
       //Graphics.Blit(tempOutRT, TestOutput);
       //Graphics.Blit(tempLUTRT, TestLUT);
@@ -756,13 +1022,14 @@ namespace GaussianTexture
       Texture2D outTex = new Texture2D(InputTex.width, InputTex.height, OutputFormat, false, true);
       Texture2D LUTTex = new Texture2D(tempLUTRT.width, tempLUTRT.height, OutputFormat, false, true);
       RenderTexture currRender = RenderTexture.active;
-      RenderTexture.active = tempOutRT;
+      Graphics.SetRenderTarget(tempOutRT, 0, CubemapFace.Unknown, 0);
       outTex.ReadPixels(new Rect(0, 0, InputTex.width, InputTex.height), 0, 0);
       outTex.Apply();
-      RenderTexture.active = tempLUTRT;
+      //RenderTexture.active = tempLUTRT;
+      Graphics.SetRenderTarget(tempLUTRT, 0, CubemapFace.Unknown, 0);
       LUTTex.ReadPixels(new Rect(0, 0, tempLUTRT.width, tempLUTRT.height), 0, 0);
       LUTTex.Apply();
-      RenderTexture.active = currRender;
+      Graphics.SetRenderTarget(currRender, 0, CubemapFace.Unknown, 0);
 
       /*
        * Create a scriptable object containing the colorspace properties

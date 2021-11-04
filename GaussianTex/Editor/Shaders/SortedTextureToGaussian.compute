@@ -19,6 +19,7 @@
 #define gaussian_inv_correction 0.997665462817
 
 RWTexture2D<float4> _TexOut;
+RWTexture2DArray<float4> _LUT;
 RWStructuredBuffer<uint> _Index;
 
 
@@ -107,7 +108,7 @@ void CreateLookupTable(uint3 id : SV_DispatchThreadID)
         float B = _Blue[index];
         float A = _Alpha[index];
         float4 color = float4(R, G, B, A);
-        _TexOut[id.xy] = color;
+        _LUT[int3(id.xy, 0)] = color;
     }
 }
 

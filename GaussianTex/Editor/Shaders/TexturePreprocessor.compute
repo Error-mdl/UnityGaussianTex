@@ -9,12 +9,14 @@
 #pragma kernel TransformColorsToEigenSpace
 #pragma kernel TransformColorsToBoundingBox
 #pragma kernel SwizzleColors
+#pragma kernel PopulateRGVariance
+#pragma kernel PopulateBAVariance
+#pragma kernel CalculateVariance
 
+#define NUM_THREADS_2D 32
 
-
-// Create a RenderTexture with enableRandomWrite flag and set it
-// with cs.SetTexture
 Texture2D<float4> _TexIn;
+Texture2D<float4> _TexIn2;
 RWTexture2D<float4> _TexOut;
 
 RWStructuredBuffer<float> _Red;
@@ -42,7 +44,7 @@ uniform float4 _MinColor;
 uniform float4 _MaxColor;
 uniform int4 _SwizzleMask;
 
-[numthreads(32, 32, 1)]
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
 void CopyTexture(uint3 id: SV_DispatchThreadID)
 {
     uint2 uv = uint2(id.x, id.y);
@@ -125,6 +127,7 @@ void AverageImage(uint3 id : SV_DispatchThreadID)
     }
 }
 
+
 /* ImageCovDiagonal
  *
  * Computes the square of the color of each pixel minus the mean color for each pixel of _TexIn,
@@ -164,6 +167,17 @@ void ImageCovUpper(uint id : SV_DispatchThreadID)
     }
 }
 
+/* MaxImage
+ *
+ * Iteratively computes the max of each color channel in _TexIn. Each thread computes the max of a _KernelWidth
+ * by _KernelHeight block of pixels and stores the result in a pixel in the first _TexWidth / _KernelWidth,
+ * _TexHeight / _KernelHeight block of _TexOut. The kernel should be called repeatedly, swapping the render-
+ * textures assigned to _TexIn and _TexOut and dividing _TexWidth and _TexHeight by the kernel dimensions every
+ * dispatch. Once _TexWidth and _TexHeight reach the size of the kernel, only one thread will execute and it will
+ * instead output the max value to _BufferAvg
+ *
+ */
+
 [numthreads(1024, 1, 1)]
 void MaxImage(uint3 id : SV_DispatchThreadID)
 {
@@ -197,6 +211,18 @@ void MaxImage(uint3 id : SV_DispatchThreadID)
         _TexOut[BlockCoords] = maxPix;
     }
 }
+
+
+/* MinImage
+ *
+ * Iteratively computes the min of each color channel in _TexIn. Each thread computes the min of a _KernelWidth
+ * by _KernelHeight block of pixels and stores the result in a pixel in the first _TexWidth / _KernelWidth,
+ * _TexHeight / _KernelHeight block of _TexOut. The kernel should be called repeatedly, swapping the render-
+ * textures assigned to _TexIn and _TexOut and dividing _TexWidth and _TexHeight by the kernel dimensions every
+ * dispatch. Once _TexWidth and _TexHeight reach the size of the kernel, only one thread will execute and it will
+ * instead output the min value to _BufferAvg
+ *
+ */
 
 [numthreads(1024, 1, 1)]
 void MinImage(uint3 id : SV_DispatchThreadID)
@@ -232,6 +258,13 @@ void MinImage(uint3 id : SV_DispatchThreadID)
     }
 }
 
+/* TransformColorsToEigenSpace
+ * 
+ * Treats the RGB colors stored in _TexOut as 3d coordinates and transforms them to the space using
+ * _EigenVector1, _EigenVector2, and _EigenVector3 as its basis vectors
+ * 
+ */
+
 [numthreads(1024, 1, 1)]
 void TransformColorsToEigenSpace(uint3 id : SV_DispatchThreadID)
 {
@@ -243,6 +276,16 @@ void TransformColorsToEigenSpace(uint3 id : SV_DispatchThreadID)
     colorNew.b = dot(color.rgb, float3(_EigenVector3[0], _EigenVector3[1], _EigenVector3[2]));
     _TexOut[uv] = colorNew;
 }
+
+
+/* TransformColorsToBoundingBox
+ *
+ * Treats the RGB colors stored in _TexOut as 3d coordinates and transforms them to a new space that is
+ * translated so that _MinColor is the center, and that is scaled on each axis so that the axis has a length
+ * of the _MaxColor - _MinColor corresponding to that axis. This makes it so that each channel's values
+ * cover the 0 to 1 range.
+ *
+ */
 
 [numthreads(1024, 1, 1)]
 void TransformColorsToBoundingBox(uint3 id : SV_DispatchThreadID)
@@ -256,6 +299,11 @@ void TransformColorsToBoundingBox(uint3 id : SV_DispatchThreadID)
     _TexOut[uv] = color;
 }
 
+/* SwizzleColors
+ *
+ * Rearranges the color channels in _TexOut to match the index order stored in _SwizzleMask
+ *
+ */
 
 [numthreads(1024, 1, 1)]
 void SwizzleColors(uint3 id : SV_DispatchThreadID)
@@ -263,4 +311,59 @@ void SwizzleColors(uint3 id : SV_DispatchThreadID)
     int2 uv = int2(id.x % _TexWidth, id.x / _TexWidth);
     float4 color = _TexOut[uv];
     _TexOut[uv] = float4(color[_SwizzleMask[0]], color[_SwizzleMask[1]], color[_SwizzleMask[2]], color[_SwizzleMask[3]]);
+}
+
+/* PopulateRGVariance
+ *
+ * Calculates R*R and G*G of each pixel of _TexIn, and stores R, R*R, G, G*G in the corresponding
+ * pixel of _TexOut. Used to prepare for calculating the variance of blocks of pixels during creation
+ * of the filtered LUT
+ *
+ */
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void PopulateRGVariance(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth && id.y < _TexHeight)
+    {
+        float4 color = _TexIn.Load(int3(id.xy, 0));
+        _TexOut[id.xy] = float4(color.r, color.r * color.r, color.g, color.g * color.g);
+    }
+}
+
+
+/* PopulateRGVariance
+ *
+ * Calculates B*B and A*A of each pixel of _TexIn, and stores B, B*B, A, A*A in the corresponding
+ * pixel of _TexOut. Used to prepare for calculating the variance of blocks of pixels during creation
+ * of the filtered LUT
+ *
+ */
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void PopulateBAVariance(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth && id.y < _TexHeight)
+    {
+        float4 color = _TexIn.Load(int3(id.xy, 0));
+        _TexOut[id.xy] = float4(color.b, color.b * color.b, color.a, color.a * color.a);
+    }
+}
+
+/* CalculateVariance
+ *
+ * Calculates the variance from the outputs of populateRGVariance and populateBGVariance.  
+ *
+ */
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void CalculateVariance(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _TexWidth && id.y < _TexHeight)
+    {
+        float4 RGVar = _TexIn[id.xy];
+        float4 BAVar = _TexIn2[id.xy];
+        float4 output = float4(RGVar.y - RGVar.x * RGVar.x, RGVar.w - RGVar.z * RGVar.z,
+            BAVar.y - BAVar.x * BAVar.x, BAVar.w - BAVar.z * BAVar.z);
+        output = max(0.0, output);
+        _TexOut[id.xy] = output;
+    }
 }
