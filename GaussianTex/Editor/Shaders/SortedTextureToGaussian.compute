@@ -1,7 +1,12 @@
 ﻿// Each #kernel tells which function to compile; you can have many kernels
 #pragma kernel CreateInvCDFTexture
 #pragma kernel CreateLookupTable
+#pragma kernel PopulateLUTMipFilter
+#pragma kernel AverageLUTMipFilter
 #pragma kernel CompressionCorrection
+#pragma kernel WriteBlackToLUT
+#pragma kernel CopyLUTSliceTo2D
+
 
 #define NUM_THREADS 1024
 #define NUM_THREADS_2D 32
@@ -18,6 +23,7 @@
 #define gaussian_correction 1.0026
 #define gaussian_inv_correction 0.997665462817
 
+Texture2D<float4> _TexIn;
 RWTexture2D<float4> _TexOut;
 RWTexture2DArray<float4> _LUT;
 RWStructuredBuffer<uint> _Index;
@@ -32,8 +38,12 @@ uniform uint _TexWidth;
 uniform uint _TexHeight;
 uniform float4 _ColorMask;
 uniform float4 _InvAxisLengths;
-uniform int _LUTWidth;
-uniform int _LUTHeight;
+
+uniform uint _LUTWidth;
+uniform uint _LUTHeight;
+uniform uint _MipLevel;
+uniform float4 _MipStd;
+uniform uint _KernelWidth;
 
 // hlsl doesn't have asinh despite having sinh, so we need to make our own
 float arcsinh(const float x)
@@ -95,7 +105,7 @@ void CreateInvCDFTexture (uint3 id : SV_DispatchThreadID)
     _TexOut[uv] = color;
 }
 
-[numthreads(MAX_DIM_LUT, MAX_DIM_LUT, 1)]
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
 void CreateLookupTable(uint3 id : SV_DispatchThreadID)
 {
     if (id.x < _LUTWidth && id.y < _LUTHeight)
@@ -112,6 +122,51 @@ void CreateLookupTable(uint3 id : SV_DispatchThreadID)
     }
 }
 
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void PopulateLUTMipFilter(uint3 id : SV_DispatchThreadID)
+{
+    uint lutDim = _LUTWidth * _LUTHeight;
+    if (id.x < lutDim * 2 && id.y < lutDim)
+    {
+        float U = Quantile(id.x, lutDim * 2);
+        float yQ = Quantile(id.y, lutDim);
+        float4 LUTx = float4(InvCDF(U, yQ, _MipStd.x), InvCDF(U, yQ, _MipStd.y), InvCDF(U, yQ, _MipStd.z), InvCDF(U, yQ, _MipStd.w));
+        LUTx *= lutDim;
+        int4 LUTdim = clamp(LUTx, 0, lutDim - 1);
+        int3 LUTuv0 = int3(LUTdim.x % _LUTWidth, LUTdim.x / _LUTWidth, 0);
+        int3 LUTuv1 = int3(LUTdim.y % _LUTWidth, LUTdim.y / _LUTWidth, 0);
+        int3 LUTuv2 = int3(LUTdim.z % _LUTWidth, LUTdim.z / _LUTWidth, 0);
+        int3 LUTuv3 = int3(LUTdim.w % _LUTWidth, LUTdim.w / _LUTWidth, 0);
+        _TexOut[id.xy] = float4(_LUT[LUTuv0].r, _LUT[LUTuv1].g, _LUT[LUTuv2].b, _LUT[LUTuv3].a);
+    }
+}
+
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void AverageLUTMipFilter(uint3 id : SV_DispatchThreadID)
+{
+    uint KernelCoords = _KernelWidth * id.x;
+    if (KernelCoords < _TexWidth && id.y < _TexHeight)
+    {
+        float4 result = 0.0f;
+        for (uint i = KernelCoords; i < KernelCoords + _KernelWidth; i++)
+        {
+            result += _TexIn.Load(int3(i, id.y, 0));
+        }
+        result /= _KernelWidth;
+        if (_KernelWidth == _TexWidth)
+        {
+            int3 uv = int3(id.y % _LUTWidth, id.y / _LUTWidth, _MipLevel);
+            _LUT[uv] = result;
+        }
+        else
+        {
+            _TexOut[id.xy] = result;
+        }
+    }
+}
+
 [numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
 void CompressionCorrection(uint3 id : SV_DispatchThreadID)
 {
@@ -120,5 +175,23 @@ void CompressionCorrection(uint3 id : SV_DispatchThreadID)
         float4 inColor = _TexOut.Load(id.xy);
         float4 outColor = (inColor - 0.5) * _InvAxisLengths + 0.5;
         _TexOut[id.xy] = outColor;
+    }
+}
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void WriteBlackToLUT(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _LUTWidth && id.y < _LUTHeight)
+    {
+        _LUT[uint3(id.xy, 1)] = float4(0,1,0,0);
+    }
+}
+
+[numthreads(NUM_THREADS_2D, NUM_THREADS_2D, 1)]
+void CopyLUTSliceTo2D(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x < _LUTWidth && id.y < _LUTHeight)
+    {
+        _TexOut[id.xy] = _LUT[uint3(id.xy, _MipLevel)];
     }
 }

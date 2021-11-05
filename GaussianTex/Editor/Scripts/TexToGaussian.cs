@@ -48,6 +48,8 @@ namespace GaussianTexture
     private static int invAxisLengthsP = Shader.PropertyToID("_InvAxisLengths");
     private static int lutWidthP = Shader.PropertyToID("_LUTWidth");
     private static int lutHeightP = Shader.PropertyToID("_LUTHeight");
+    private static int mipLevelP = Shader.PropertyToID("_MipLevel");
+    private static int mipStdP = Shader.PropertyToID("_MipStd");
 
 
     #region PRIVATE_METHODS
@@ -555,7 +557,7 @@ namespace GaussianTexture
           TexturePreprocessor.SetInt(kernelHeightP, kernelWidth);
         }
       }
-      Debug.Log("Ran block average for: " + j.ToString());
+      //Debug.Log("Ran block average for: " + j.ToString());
     }
 
     /// <summary>
@@ -631,10 +633,10 @@ namespace GaussianTexture
 
       if (mipWidth == 1 && mipHeight == 1)
       {
-        varArray[0] = rgVarArray[1] - rgVarArray[0] * rgVarArray[0];
-        varArray[1] = rgVarArray[3] - rgVarArray[2] * rgVarArray[2];
-        varArray[2] = baVarArray[1] - baVarArray[0] * baVarArray[0];
-        varArray[3] = baVarArray[1] - baVarArray[2] * baVarArray[2];
+        varArray[0] = Mathf.Max(0.0f, rgVarArray[1] - rgVarArray[0] * rgVarArray[0]);
+        varArray[1] = Mathf.Max(0.0f, rgVarArray[3] - rgVarArray[2] * rgVarArray[2]);
+        varArray[2] = Mathf.Max(0.0f, baVarArray[1] - baVarArray[0] * baVarArray[0]);
+        varArray[3] = Mathf.Max(0.0f, baVarArray[3] - baVarArray[2] * baVarArray[2]);
       }
       else
       {
@@ -650,8 +652,9 @@ namespace GaussianTexture
       return new Vector4(varArray[0], varArray[1], varArray[2], varArray[3]);
     }
 
-    
-    Vector4 ComputeLODAverageSubpixelVariance(RenderTexture TexIn, int LOD)
+
+    /*
+    private Vector4 ComputeLODAverageSubpixelVariance(RenderTexture TexIn, int LOD)
     {
       RenderTexture active = RenderTexture.active;
       Texture2D temp = new Texture2D(TexIn.width, TexIn.height, TextureFormat.RGBAFloat, false);
@@ -713,11 +716,77 @@ namespace GaussianTexture
       return new Vector4((float)average_window_variance[0], (float)average_window_variance[1], (float)average_window_variance[2], (float)average_window_variance[3]);
     }
    
-    private void FilterLUT(RenderTexture TexIn)
+    */
+    
+    private void CreateFilteredLUTLevel(RenderTexture LUT, RenderTexture temp1, RenderTexture temp2, int mip, int lutWidth, int lutHeight, Vector4 stdDev)
+    {
+      int populateKern = CumulativeDistribution.FindKernel("PopulateLUTMipFilter");
+      int averageKern = CumulativeDistribution.FindKernel("AverageLUTMipFilter");
+
+      int texHeight = lutWidth * lutHeight;
+      int texWidth = lutWidth * lutHeight * 2;
+      int kernelWidth = 16;
+
+      CumulativeDistribution.SetFloats(mipStdP, new float[4] { stdDev.x, stdDev.y, stdDev.z, stdDev.w });
+
+      CumulativeDistribution.SetInt(lutWidthP, lutWidth);
+      CumulativeDistribution.SetInt(lutHeightP, lutHeight);
+      CumulativeDistribution.SetInt(mipLevelP, mip);
+      CumulativeDistribution.SetTexture(populateKern, texOutP, temp1);
+      CumulativeDistribution.SetTexture(populateKern, lutP, LUT);
+      CumulativeDistribution.Dispatch(populateKern, Mathf.Max(1, texWidth / 32), Mathf.Max(1, texHeight / 32), 1);
+
+      CumulativeDistribution.SetInt(kernelWidthP, kernelWidth);
+      CumulativeDistribution.SetTexture(averageKern, lutP, LUT);
+      CumulativeDistribution.SetInt(texHeightP, texHeight);
+
+      int currentWidth = texWidth;
+      bool oddStep = false;
+      for ( int i = texWidth; i >= kernelWidth; i /= kernelWidth)
+      {
+        CumulativeDistribution.SetInt(texWidthP, currentWidth);
+       
+        if (oddStep)
+        {
+          CumulativeDistribution.SetTexture(averageKern, texInP, temp2);
+          CumulativeDistribution.SetTexture(averageKern, texOutP, temp1);
+        }
+        else
+        {
+          CumulativeDistribution.SetTexture(averageKern, texInP, temp1);
+          CumulativeDistribution.SetTexture(averageKern, texOutP, temp2);
+        }
+
+        CumulativeDistribution.Dispatch(averageKern, Mathf.Max(1, currentWidth / 32), Mathf.Max(1, texHeight / 32), 1);
+        oddStep = !oddStep;
+        currentWidth /= kernelWidth;
+      }
+
+      if (currentWidth > 1)
+      {
+        CumulativeDistribution.SetInt(kernelWidthP, currentWidth);
+        CumulativeDistribution.SetInt(texWidthP, currentWidth);
+
+        if (oddStep)
+        {
+          CumulativeDistribution.SetTexture(averageKern, texInP, temp2);
+          CumulativeDistribution.SetTexture(averageKern, texOutP, temp1);
+        }
+        else
+        {
+          CumulativeDistribution.SetTexture(averageKern, texInP, temp1);
+          CumulativeDistribution.SetTexture(averageKern, texOutP, temp2);
+        }
+
+        CumulativeDistribution.Dispatch(averageKern, Mathf.Max(1, currentWidth / 32), Mathf.Max(1, texHeight / 32), 1);
+      }
+    }
+    
+    private void FilterLUT(RenderTexture TexIn, RenderTexture LUT)
     {
       int texWidth = TexIn.width;
       int texHeight = TexIn.height;
-      int mipLevels = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2));
+      int mipLevels = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2)) + 1;
 
       int varKernRG = TexturePreprocessor.FindKernel("PopulateRGVariance");
       int varKernBA = TexturePreprocessor.FindKernel("PopulateBAVariance");
@@ -733,23 +802,34 @@ namespace GaussianTexture
       RenderTexture temp3 = new RenderTexture(texWidth >> 1, texHeight >> 1, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
       temp3.enableRandomWrite = true;
       temp3.Create();
+
       ComputeBuffer avgOut = new ComputeBuffer(4, 4);
 
-      //for (int i = 1; i <= mipLevels; i++)
-      //{
-        Vector4 variance = CalculateMipVariance(TexIn, temp1, temp2, temp3, avgOut, 10, varKernRG, varKernBA, varKern, avgKern);
+      int lutElements = LUT.width * LUT.height;
+      RenderTexture tempLUT1 = new RenderTexture(lutElements << 1, lutElements, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      tempLUT1.enableRandomWrite = true;
+      tempLUT1.Create();
+      RenderTexture tempLUT2 = new RenderTexture(lutElements, lutElements, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      tempLUT2.enableRandomWrite = true;
+      tempLUT2.Create();
 
-      //}
+
+      for (int i = 1; i <= mipLevels; i++)
+      {
+        Vector4 variance = CalculateMipVariance(TexIn, temp1, temp2, temp3, avgOut, i, varKernRG, varKernBA, varKern, avgKern);
+        variance = new Vector4(Mathf.Sqrt(variance.x), Mathf.Sqrt(variance.y), Mathf.Sqrt(variance.z), Mathf.Sqrt(variance.w));
+        CreateFilteredLUTLevel(LUT, tempLUT1, tempLUT2, i, LUT.width, LUT.height, variance);
+      }
 
 
-      
-      UnityEngine.Profiling.Profiler.BeginSample("CPU Variant");
-      Vector4 variance2 = ComputeLODAverageSubpixelVariance(TexIn, 10);
-      UnityEngine.Profiling.Profiler.EndSample();
-      
-      Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance.x, variance.y, variance.z, variance.w));
-      Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance2.x, variance2.y, variance2.z, variance2.w));
-      
+      /* 
+       UnityEngine.Profiling.Profiler.BeginSample("CPU Variant");
+       Vector4 variance2 = ComputeLODAverageSubpixelVariance(TexIn, 2);
+       UnityEngine.Profiling.Profiler.EndSample();
+
+       Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance.x, variance.y, variance.z, variance.w));
+       Debug.Log(string.Format("{0}, {1}, {2}, {3}", variance2.x, variance2.y, variance2.z, variance2.w));
+       */
 
       avgOut.Release();
       temp1.Release();
@@ -757,6 +837,15 @@ namespace GaussianTexture
       temp3.Release();
     }
     
+
+    private void CopyLUTSliceTo2D(RenderTexture LUT, RenderTexture Slice2D, int mipLevel)
+    {
+      int sliceKern = CumulativeDistribution.FindKernel("CopyLUTSliceTo2D");
+      CumulativeDistribution.SetInt(mipLevelP, mipLevel);
+      CumulativeDistribution.SetTexture(sliceKern, lutP, LUT);
+      CumulativeDistribution.SetTexture(sliceKern, texOutP, Slice2D);
+      CumulativeDistribution.Dispatch(sliceKern, 1, 1, 1);
+    }
 
     private bool NoAlphaFormat(TextureFormat format)
     {
@@ -833,7 +922,8 @@ namespace GaussianTexture
 
       int LUTWidth = 1 << Mathf.Clamp(LUTWidthPow2, 1, 5);
       int LUTHeight = 1 << Mathf.Clamp(LUTHeightPow2, 1, 5);
-      int LUTDepth = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2));
+      int LUTDepth = Mathf.RoundToInt(Mathf.Log(Mathf.Min(texWidth, texHeight), 2)) + 1;
+      Debug.Log(string.Format("Mip Levels: {0}", LUTDepth));
       /* First check if the input texture has power of 2 dimensions. The gpu bitonic merge sort
        * algorithm I'm using only works with power of 2 data sets, so we can't convert NPOT images
        */
@@ -858,8 +948,14 @@ namespace GaussianTexture
       tempOutRT.Create();
       RenderTexture tempLUTRT = new RenderTexture(LUTWidth, LUTHeight, LUTDepth, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
       tempLUTRT.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
+      tempLUTRT.volumeDepth = LUTDepth;
       tempLUTRT.enableRandomWrite = true;
       tempLUTRT.Create();
+      tempLUTRT.dimension = UnityEngine.Rendering.TextureDimension.Tex2DArray;
+      tempLUTRT.volumeDepth = LUTDepth;
+      RenderTexture tempLUT2D = new RenderTexture(LUTWidth, LUTHeight, 1, RenderTextureFormat.ARGBFloat, RenderTextureReadWrite.Linear);
+      tempLUT2D.enableRandomWrite = true;
+      tempLUT2D.Create();
 
 
       //Graphics.Blit(InputTex, tempOutRT);
@@ -981,14 +1077,6 @@ namespace GaussianTexture
         CumulativeDistribution.Dispatch(InvCDFKernel, numGroupsInvCDF, 1, 1);
       }
 
-      if (CompressionCorrection)
-      {
-        float[] invAxisLengths = new float[4] {1.0f / axis0.w, 1.0f / axis1.w, 1.0f / axis2.w, 1};
-        int compCorrKern = CumulativeDistribution.FindKernel("CompressionCorrection");
-        CumulativeDistribution.SetFloats(invAxisLengthsP, invAxisLengths);
-        CumulativeDistribution.SetTexture(compCorrKern, texOutP, tempOutRT);
-        CumulativeDistribution.Dispatch(compCorrKern, Mathf.Max(1, InputTex.width / 32), Mathf.Max(1, InputTex.height / 32), 1);
-      }
 
       /*
        * Create the Lookup Table by calculating the CDF
@@ -1005,7 +1093,31 @@ namespace GaussianTexture
       CumulativeDistribution.SetInt(lutHeightP, LUTHeight);
       CumulativeDistribution.Dispatch(LUTKernel, 1, 1, 1);
 
-      FilterLUT(tempOutRT);
+      FilterLUT(tempOutRT, tempLUTRT);
+      //int blackKern = CumulativeDistribution.FindKernel("WriteBlackToLUT");
+      //CumulativeDistribution.SetTexture(blackKern, lutP, tempLUTRT);
+      //CumulativeDistribution.Dispatch(blackKern, 1, 1, 1);
+
+
+
+      /*
+       * Correct for DXT compression in the gaussian texture by scaling the colors about 0.5 by the axis length.
+       * The LUT filtering process requires the unmodified gaussian texture, so do this after filtering the LUT.
+       * 
+       */
+
+      if (CompressionCorrection)
+      {
+        float[] invAxisLengths = new float[4] { 1.0f / axis0.w, 1.0f / axis1.w, 1.0f / axis2.w, 1 };
+        int compCorrKern = CumulativeDistribution.FindKernel("CompressionCorrection");
+        CumulativeDistribution.SetInt(texWidthP, texWidth);
+        CumulativeDistribution.SetInt(texHeightP, texHeight);
+        CumulativeDistribution.SetInt(lutWidthP, LUTWidth);
+        CumulativeDistribution.SetInt(lutHeightP, LUTHeight);
+        CumulativeDistribution.SetFloats(invAxisLengthsP, invAxisLengths);
+        CumulativeDistribution.SetTexture(compCorrKern, texOutP, tempOutRT);
+        CumulativeDistribution.Dispatch(compCorrKern, Mathf.Max(1, InputTex.width / 32), Mathf.Max(1, InputTex.height / 32), 1);
+      }
 
 
       //Graphics.Blit(tempOutRT, TestOutput);
@@ -1020,15 +1132,28 @@ namespace GaussianTexture
 
       TextureFormat OutputFormat = NoAlpha ? TextureFormat.RGB24 : TextureFormat.ARGB32;
       Texture2D outTex = new Texture2D(InputTex.width, InputTex.height, OutputFormat, false, true);
-      Texture2D LUTTex = new Texture2D(tempLUTRT.width, tempLUTRT.height, OutputFormat, false, true);
+      Texture2D LUTSlice = new Texture2D(tempLUTRT.width, tempLUTRT.height, OutputFormat, false, true);
+      Texture2DArray LUTTex = new Texture2DArray(tempLUTRT.width, tempLUTRT.height, LUTDepth, OutputFormat, false, true);
       RenderTexture currRender = RenderTexture.active;
       Graphics.SetRenderTarget(tempOutRT, 0, CubemapFace.Unknown, 0);
       outTex.ReadPixels(new Rect(0, 0, InputTex.width, InputTex.height), 0, 0);
       outTex.Apply();
       //RenderTexture.active = tempLUTRT;
-      Graphics.SetRenderTarget(tempLUTRT, 0, CubemapFace.Unknown, 0);
-      LUTTex.ReadPixels(new Rect(0, 0, tempLUTRT.width, tempLUTRT.height), 0, 0);
-      LUTTex.Apply();
+
+      Graphics.SetRenderTarget(tempLUT2D, 0, CubemapFace.Unknown, 0);
+      CumulativeDistribution.SetInt(lutWidthP, LUTWidth);
+      CumulativeDistribution.SetInt(lutHeightP, LUTHeight);
+      for (int mip = 0; mip < LUTDepth; mip++)
+      {
+        CopyLUTSliceTo2D(tempLUTRT, tempLUT2D, mip);
+        Graphics.SetRenderTarget(tempLUT2D, 0, CubemapFace.Unknown, 0);
+        LUTSlice.ReadPixels(new Rect(0, 0, tempLUTRT.width, tempLUTRT.height), 0, 0);
+        LUTSlice.Apply();
+        //LUTTex.SetPixels(LUTSlice.GetPixels(), mip);
+        Graphics.CopyTexture(LUTSlice, 0, LUTTex, mip);
+      }
+      //LUTTex.Apply();
+
       Graphics.SetRenderTarget(currRender, 0, CubemapFace.Unknown, 0);
 
       /*
@@ -1048,7 +1173,6 @@ namespace GaussianTexture
        */
 
       byte[] outBytes = outTex.EncodeToPNG();
-      byte[] LUTBytes = LUTTex.EncodeToPNG();
       string dataPath = Application.dataPath;
       dataPath = dataPath.Substring(0, dataPath.Length - 7); //Path to your assets folder, minus the assets folder itself
       string inputNameAndPath = AssetDatabase.GetAssetPath(InputTex);
@@ -1063,9 +1187,20 @@ namespace GaussianTexture
       }
 
       string outputImagePath = Path.Combine(outputImageDir, inputName + "_gauss.png");
-      string outputLUTPath = Path.Combine(outputImageDir, inputName + "_lut.png");
+      string outputLUTPath = Path.Combine(outputImageDir, inputName + "_lut.asset");
       File.WriteAllBytes(Path.Combine(dataPath, outputImagePath), outBytes);
-      File.WriteAllBytes(Path.Combine(dataPath, outputLUTPath), LUTBytes);
+
+      if (File.Exists(Path.Combine(dataPath, outputLUTPath)))
+      {
+        Texture2DArray oldLUT = AssetDatabase.LoadAssetAtPath(outputLUTPath, typeof(Texture2DArray)) as Texture2DArray;
+        EditorUtility.CopySerialized(LUTTex, oldLUT);
+        DestroyImmediate(LUTTex);
+      }
+      else
+      {
+        AssetDatabase.CreateAsset(LUTTex, outputLUTPath);
+      }
+
       /*
        * Save the scriptable object
        * 
@@ -1092,14 +1227,9 @@ namespace GaussianTexture
       {
         AssetDatabase.ImportAsset(outputImagePath);
       }
-      if (AssetDatabase.LoadMainAssetAtPath(outputLUTPath) == null)
-      {
-        AssetDatabase.ImportAsset(outputLUTPath);
-      }
 
       TextureImporter inputImport = AssetImporter.GetAtPath(inputNameAndPath) as TextureImporter;
       TextureImporter gaussImport = AssetImporter.GetAtPath(outputImagePath) as TextureImporter;
-      TextureImporter LUTImport = AssetImporter.GetAtPath(outputLUTPath) as TextureImporter;
       //bool inputLinear = inputImport.sRGBTexture;
      // inputImport.sRGBTexture = false;
 
@@ -1114,20 +1244,6 @@ namespace GaussianTexture
       {
         Debug.LogError("Failed to set import settings on " + outputImagePath + ". YOU MUST UNCHECK sRGB IN THE TEXTURE'S IMPORT SETTINGS YOURSELF OR THE TEXTURE WILL NOT WORK!");
       }
-
-      if (LUTImport != null)
-      {
-        LUTImport.sRGBTexture = false;
-        LUTImport.mipmapEnabled = false;
-        LUTImport.textureCompression = TextureImporterCompression.Uncompressed;
-        LUTImport.wrapMode = TextureWrapMode.Clamp;
-        AssetDatabase.ImportAsset(outputLUTPath);
-      }
-      else
-      {
-        Debug.LogError("Failed to set import settings on " + outputLUTPath + ". YOU MUST UNCHECK sRGB IN THE TEXTURE'S IMPORT SETTINGS YOURSELF OR THE TEXTURE WILL NOT WORK!");
-      }
-
 
      // inputImport.sRGBTexture = inputLinear;
 
