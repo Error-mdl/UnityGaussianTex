@@ -64,12 +64,12 @@ For supporting textures like the metallic-smoothness map where the color channel
 
 # References
 
-Deliot, Thomas, and Eric Heitz. "Procedural stochastic textures by tiling and blending." GPU Zen 2 (2019). [](https://eheitzresearch.wordpress.com/738-2/)
+Deliot, Thomas, and Eric Heitz. "Procedural stochastic textures by tiling and blending." GPU Zen 2 (2019). [https://eheitzresearch.wordpress.com/738-2/](https://eheitzresearch.wordpress.com/738-2/)
 
-Burley, Brent, and Walt Disney Animation Studios. "On Histogram-Preserving Blending for Randomized Texture Tiling." Journal of Computer Graphics Techniques (JCGT) 8.4 (2019): 8. [](https://www.jcgt.org/published/0008/04/02/paper-lowres.pdf)
+Burley, Brent, and Walt Disney Animation Studios. "On Histogram-Preserving Blending for Randomized Texture Tiling." Journal of Computer Graphics Techniques (JCGT) 8.4 (2019): 8. [https://www.jcgt.org/published/0008/04/02/paper-lowres.pdf](https://www.jcgt.org/published/0008/04/02/paper-lowres.pdf)
 
-Implementing Bitonic Merge Sort in Vulkan Compute. [](https://poniesandlight.co.uk/reflect/bitonic_merge_sort/)
+Implementing Bitonic Merge Sort in Vulkan Compute. [https://poniesandlight.co.uk/reflect/bitonic_merge_sort/](https://poniesandlight.co.uk/reflect/bitonic_merge_sort/)
  
-Eberly, David. "A Robust Eigensolver for 3x3 Symmetric Matrices." Geometric Tools (2021). [](https://www.geometrictools.com/Documentation/RobustEigenSymmetric3x3.pdf)
+Eberly, David. "A Robust Eigensolver for 3x3 Symmetric Matrices." Geometric Tools (2021). [https://www.geometrictools.com/Documentation/RobustEigenSymmetric3x3.pdf](https://www.geometrictools.com/Documentation/RobustEigenSymmetric3x3.pdf)
 
-Vedder, John D. "Simple approximations for the error function and its inverse." American Journal of Physics 55.8 (1987): 762-763. [](https://aapt.scitation.org/doi/abs/10.1119/1.15018?journalCode=ajp)
+Vedder, John D. "Simple approximations for the error function and its inverse." American Journal of Physics 55.8 (1987): 762-763. [https://aapt.scitation.org/doi/abs/10.1119/1.15018?journalCode=ajp](https://aapt.scitation.org/doi/abs/10.1119/1.15018?journalCode=ajp)
