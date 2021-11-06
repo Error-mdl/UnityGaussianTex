@@ -5,6 +5,7 @@ using MatrixPlus;
 
 namespace GaussianTexture
 {
+  public enum FileType { png, jpg, tga, exr };
   public class TexToGaussian : ScriptableObject
   {
 
@@ -653,70 +654,6 @@ namespace GaussianTexture
     }
 
 
-    /*
-    private Vector4 ComputeLODAverageSubpixelVariance(RenderTexture TexIn, int LOD)
-    {
-      RenderTexture active = RenderTexture.active;
-      Texture2D temp = new Texture2D(TexIn.width, TexIn.height, TextureFormat.RGBAFloat, false);
-      RenderTexture.active = TexIn;
-      temp.ReadPixels(new Rect(0, 0, TexIn.width, TexIn.height), 0, 0);
-      temp.Apply();
-      RenderTexture.active = active;
-      // Window width associated with
-      int windowWidth = 1 << LOD;
-
-      // Compute average variance in all the windows
-      double[] average_window_variance = new double[4] { 0.0, 0.0, 0.0, 0.0 };
-
-      // Loop over al the windows
-      for (int window_y = 0; window_y < TexIn.height; window_y += windowWidth)
-        for (int window_x = 0; window_x < TexIn.width; window_x += windowWidth)
-        {
-          // Estimate variance of current window
-          double[] v = new double[4] { 0.0, 0.0, 0.0, 0.0 };
-          double[] v2 = new double[4] { 0.0, 0.0, 0.0, 0.0 };
-          for (int y = 0; y < windowWidth; y++)
-            for (int x = 0; x < windowWidth; x++)
-            {
-              Vector4 value = temp.GetPixel(window_x + x, window_y + y);
-              v[0] = v[0] + value.x;
-              v[1] = v[1] + value.y;
-              v[2] = v[2] + value.z;
-              v[3] = v[3] + value.w;
-              v2[0] = v2[0] + value.x * value.x;
-              v2[1] = v2[1] + value.y * value.y;
-              v2[2] = v2[2] + value.z * value.z;
-              v2[3] = v2[3] + value.w * value.w;
-            }
-          v[0] /= (windowWidth * windowWidth);
-          v[1] /= (windowWidth * windowWidth);
-          v[2] /= (windowWidth * windowWidth);
-          v[3] /= (windowWidth * windowWidth);
-          v2[0] /= (windowWidth * windowWidth);
-          v2[1] /= (windowWidth * windowWidth);
-          v2[2] /= (windowWidth * windowWidth);
-          v2[3] /= (windowWidth * windowWidth);
-          double[] window_variance = new double[4]{
-            System.Math.Max(0.0, v2[0] - v[0]*v[0]),
-            System.Math.Max(0.0, v2[1] - v[1]*v[1]),
-            System.Math.Max(0.0, v2[2] - v[2]*v[2]),
-            System.Math.Max(0.0, v2[3] - v[3]*v[3])
-          };
-          if (window_x == 0 && window_y == 0)
-          {
-            Debug.Log(string.Format("CPU First Block Var: {0}, {1}, {2}, {3}", v[0], v2[0], v[1], v2[1]));
-          }
-          // Update average
-          average_window_variance[0] += window_variance[0] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
-          average_window_variance[1] += window_variance[1] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
-          average_window_variance[2] += window_variance[2] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
-          average_window_variance[3] += window_variance[3] / (TexIn.width * TexIn.height / windowWidth / windowWidth);
-        }
-
-      return new Vector4((float)average_window_variance[0], (float)average_window_variance[1], (float)average_window_variance[2], (float)average_window_variance[3]);
-    }
-   
-    */
     
     private void CreateFilteredLUTLevel(RenderTexture LUT, RenderTexture temp1, RenderTexture temp2, int mip, int lutWidth, int lutHeight, Vector4 stdDev)
     {
@@ -835,6 +772,8 @@ namespace GaussianTexture
       temp1.Release();
       temp2.Release();
       temp3.Release();
+      tempLUT1.Release();
+      tempLUT2.Release();
     }
     
 
@@ -912,9 +851,11 @@ namespace GaussianTexture
     /// <param name="InputTex">Texture to transform into a gaussian texture and lookup table</param>
     /// <param name="LUTWidthPow2">Power of 2 of the width of the lookup table, clamped to 1 to 5</param>
     /// <param name="LUTHeightPow2">Power of 2 of the height of the lookup table, clamped to 1 to 5</param>
+    /// <param name="CompressionCorrection">Whether or not to scale the colors by the colorspace axis lengths to try to get better DXT compression</param>
     /// <param name="DecorrelateColorspace">Whether or not to transform the textures colors to a space where the color channels aren't correlated. Prevents false colors from appearing in some images but may reduce compression quality</param>
+    /// <param name="outputImageType">File type to save the gaussian texture as</param>
     /// <param name="outputImageDir">Output directory to save the gaussian image to. If not specified, saves the image next to the input image. Files are given the input's name plus an extension like "_gauss"</param>
-    public void CreateGaussianTexture(Texture2D InputTex, int LUTWidthPow2, int LUTHeightPow2, bool CompressionCorrection = true, bool DecorrelateColorspace = true, string outputImageDir = null)
+    public void CreateGaussianTexture(Texture2D InputTex, int LUTWidthPow2, int LUTHeightPow2, bool CompressionCorrection = false, bool DecorrelateColorspace = true, FileType outputImageType = FileType.png, string outputImageDir = null)
     {
 
       int texWidth = InputTex.width;
@@ -1131,6 +1072,7 @@ namespace GaussianTexture
        */
 
       TextureFormat OutputFormat = NoAlpha ? TextureFormat.RGB24 : TextureFormat.ARGB32;
+      OutputFormat = outputImageType == FileType.exr ? TextureFormat.RGBAFloat : OutputFormat;
       Texture2D outTex = new Texture2D(InputTex.width, InputTex.height, OutputFormat, false, true);
       Texture2D LUTSlice = new Texture2D(tempLUTRT.width, tempLUTRT.height, OutputFormat, false, true);
       Texture2DArray LUTTex = new Texture2DArray(tempLUTRT.width, tempLUTRT.height, LUTDepth, OutputFormat, false, true);
@@ -1172,7 +1114,26 @@ namespace GaussianTexture
        * 
        */
 
-      byte[] outBytes = outTex.EncodeToPNG();
+      byte[] outBytes;
+      switch (outputImageType)
+      {
+        case FileType.png:
+          outBytes = outTex.EncodeToPNG();
+          break;
+        case FileType.jpg:
+          outBytes = outTex.EncodeToJPG(95);
+          break;
+        case FileType.tga:
+          outBytes = outTex.EncodeToTGA();
+          break;
+        case FileType.exr:
+          outBytes = outTex.EncodeToEXR();
+          break;
+        default:
+          outBytes = outTex.EncodeToPNG();
+          break;
+      }
+     
       string dataPath = Application.dataPath;
       dataPath = dataPath.Substring(0, dataPath.Length - 7); //Path to your assets folder, minus the assets folder itself
       string inputNameAndPath = AssetDatabase.GetAssetPath(InputTex);
@@ -1186,7 +1147,26 @@ namespace GaussianTexture
         outputImageDir = inputPath;
       }
 
-      string outputImagePath = Path.Combine(outputImageDir, inputName + "_gauss.png");
+      string outputFileType;
+      switch (outputImageType)
+      {
+        case FileType.png:
+          outputFileType = ".png";
+          break;
+        case FileType.jpg:
+          outputFileType = ".jpg";
+          break;
+        case FileType.tga:
+          outputFileType = ".tga";
+          break;
+        case FileType.exr:
+          outputFileType = ".exr";
+          break;
+        default:
+          outputFileType = ".png";
+          break;
+      }
+      string outputImagePath = Path.Combine(outputImageDir, inputName + "_gauss" + outputFileType);
       string outputLUTPath = Path.Combine(outputImageDir, inputName + "_lut.asset");
       File.WriteAllBytes(Path.Combine(dataPath, outputImagePath), outBytes);
 
@@ -1205,7 +1185,7 @@ namespace GaussianTexture
        * Save the scriptable object
        * 
        */
-      string outputColorspacePath = Path.Combine(outputImageDir, inputName + "_Colorspace.asset");
+      string outputColorspacePath = Path.Combine(outputImageDir, inputName + "_colorspace.asset");
       if (File.Exists(Path.Combine(dataPath, outputColorspacePath)))
       {
         ColorspaceObj oldColors = AssetDatabase.LoadAssetAtPath(outputColorspacePath, typeof(ColorspaceObj)) as ColorspaceObj;
@@ -1237,6 +1217,12 @@ namespace GaussianTexture
       {
 
         EditorUtility.CopySerialized(inputImport, gaussImport);
+        // Our gaussian texture is not a normal map even if the input was a normal!
+        // Unity does a conversion process on the image if it is marked as normal that would alter the information stored in our image. 
+        if (gaussImport.textureType == TextureImporterType.NormalMap)
+        {
+          gaussImport.textureType = TextureImporterType.Default;
+        }
         gaussImport.sRGBTexture = false;
         AssetDatabase.ImportAsset(outputImagePath);
       }

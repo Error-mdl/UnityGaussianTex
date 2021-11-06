@@ -13,9 +13,9 @@ public class GaussTexUI : EditorWindow
   public Material TestMaterial;
   public ColorspaceObj colorSpace;
   public bool EigenColors = true;
+  public bool CompressionCorrection = false;
+  public FileType fileType = FileType.png;
 
-  public RenderTexture TestOutput;
-  public RenderTexture TestLUT;
 
   public string axis0Property = "_CX";
   public string axis1Property = "_CY";
@@ -45,7 +45,7 @@ public class GaussTexUI : EditorWindow
 
   private TexToGaussian ImageConverter;
 
-  [MenuItem("Window/Tools/Convert Texture To Gaussian")]
+  [MenuItem("Window/Convert Texture To Gaussian")]
   public static void ShowWindow()
   {
     GaussTexUI GaussUI = GetWindow<GaussTexUI>(false, "  Tex2Gaussian", true);
@@ -89,12 +89,27 @@ public class GaussTexUI : EditorWindow
     {
       EditorGUI.indentLevel++;
       InputTex = EditorGUILayout.ObjectField("Texture to Convert", InputTex, typeof(Texture2D), false, GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH)) as Texture2D;
-      
+
+      fileType = (FileType)EditorGUILayout.EnumPopup("Save as: ", fileType, GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
+
       EditorGUILayout.BeginHorizontal(GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
-      EditorGUILayout.LabelField(new GUIContent("Decorrolated Colorspace","Prevents colors from appearing that aren't in the input image, but may slightly reduce color accuracy"));
+      EditorGUILayout.LabelField(new GUIContent("Decorrolate Colorspace (Albedo, Specular only)","Prevents colors from appearing that aren't in the input image, but may slightly" +
+        " reduce color accuracy. Only use with images that contain color information, not for images which contain independent information in each channel like metallic-smoothness maps"),
+        GUILayout.Width(300));
       GUILayout.FlexibleSpace();
       EigenColors = EditorGUILayout.Toggle(EigenColors, GUILayout.Width(64 + SCROLL_WIDTH));
       EditorGUILayout.EndHorizontal();
+
+      using (new EditorGUI.DisabledScope(EigenColors == false))
+      {
+        EditorGUILayout.BeginHorizontal(GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
+        EditorGUILayout.LabelField(new GUIContent("Compression Correction", "If Decorrolate Colorspace is enabled, attempt to correct for DXT compression." +
+        "Seems to cause bad artifacts in many cases"),
+        GUILayout.Width(300));
+        GUILayout.FlexibleSpace();
+        CompressionCorrection = EditorGUILayout.Toggle(CompressionCorrection, GUILayout.Width(64 + SCROLL_WIDTH));
+        EditorGUILayout.EndHorizontal();
+      }
 
       EditorGUILayout.BeginHorizontal(GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
       EditorGUILayout.LabelField("Lookup Table Dimensions:");
@@ -130,7 +145,7 @@ public class GaussTexUI : EditorWindow
           ImageConverter.TexturePreprocessor = TexturePreprocessor;
           ImageConverter.BitonicSort = BitonicSort;
           ImageConverter.CumulativeDistribution = CumulativeDistribution;
-          ImageConverter.CreateGaussianTexture(InputTex, LUTWidthPow2, LUTHeightPow2, true, EigenColors);
+          ImageConverter.CreateGaussianTexture(InputTex, LUTWidthPow2, LUTHeightPow2, CompressionCorrection, EigenColors, fileType);
 
           string inputNameAndPath = AssetDatabase.GetAssetPath(InputTex);
           string inputName = Path.GetFileNameWithoutExtension(inputNameAndPath);
