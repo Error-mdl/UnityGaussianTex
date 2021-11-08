@@ -10,7 +10,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: e273ecb3e5512c84898715e24802c7c6, type: 3}
-  m_Name: mossdemo_colorspace
+  m_Name: 
   m_EditorClassIdentifier: 
   Axis0: {x: 0.017838398, y: -0.1237444, z: 0.35707602, w: 1}
   Axis1: {x: 0.7077192, y: 0.578709, z: 0.1651957, w: 1}
