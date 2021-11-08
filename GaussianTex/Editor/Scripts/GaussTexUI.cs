@@ -91,6 +91,18 @@ public class GaussTexUI : EditorWindow
       InputTex = EditorGUILayout.ObjectField("Texture to Convert", InputTex, typeof(Texture2D), false, GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH)) as Texture2D;
 
       fileType = (FileType)EditorGUILayout.EnumPopup("Save as: ", fileType, GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
+      if (fileType == FileType.jpg)
+      {
+        TextureImporter texImp = (TextureImporter)AssetImporter.GetAtPath(AssetDatabase.GetAssetPath(InputTex));
+        if (texImp?.textureType == TextureImporterType.NormalMap)
+        {
+          EditorGUILayout.HelpBox("Jpg format cannot store normal maps as they use an alpha channel", MessageType.Error, true);
+        }
+        else
+        {
+          EditorGUILayout.HelpBox("Jpg format cannot store an alpha channel, only use this for textures with no alpha", MessageType.Warning, true);
+        }
+      }
 
       EditorGUILayout.BeginHorizontal(GUILayout.Width(EditorGUIUtility.currentViewWidth - SCROLL_WIDTH));
       EditorGUILayout.LabelField(new GUIContent("Decorrolate Colorspace (Albedo, Specular only)","Prevents colors from appearing that aren't in the input image, but may slightly" +
@@ -150,8 +162,9 @@ public class GaussTexUI : EditorWindow
           string inputNameAndPath = AssetDatabase.GetAssetPath(InputTex);
           string inputName = Path.GetFileNameWithoutExtension(inputNameAndPath);
           string inputPath = Path.GetDirectoryName(inputNameAndPath);
-          string outputImagePath = Path.Combine(inputPath, inputName + "_gauss.png");
-          string outputLUTPath = Path.Combine(inputPath, inputName + "_lut.png");
+
+          string outputImagePath = Path.Combine(inputPath, inputName + "_gauss" + TexToGaussian.FileTypeToString(fileType));
+          string outputLUTPath = Path.Combine(inputPath, inputName + "_lut.asset");
           string outputColorspacePath = Path.Combine(inputPath, inputName + "_Colorspace.asset");
           EditorGUIUtility.PingObject(AssetDatabase.LoadMainAssetAtPath(outputImagePath));
           EditorUtility.DisplayDialog("Textures Successfully Created", 
