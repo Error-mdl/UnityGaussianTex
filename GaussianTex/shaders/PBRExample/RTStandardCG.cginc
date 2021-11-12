@@ -21,6 +21,8 @@ uniform float4 _CX;
 uniform float4 _CY;
 uniform float4 _CZ;
 
+
+
 #include "RTStandardCommon.cginc"
 #include "../GaussianBlend.cginc"
 
@@ -81,6 +83,7 @@ float4 frag(v2f i) : SV_TARGET
 	float4 normTotal = Blend3GaussianRGBANoCs(normGauss1, normGauss2, normGauss3, weights);
 	float4 normColor = LookUpTableRGBA(_NormalMap_LUT, _NormalMap_LUT_TexelSize.zw, normTotal, mip);
 
+	//float4 normColor = normGauss1 * weights.x + normGauss2 * weights.y + normGauss2 * weights.z / (weights.x + weights.y + weights.z);
 	//float3 tNormal = normalize(2*normColor - 1 );
 	float3 tNormal = normalize(UnpackNormal(normColor));
 

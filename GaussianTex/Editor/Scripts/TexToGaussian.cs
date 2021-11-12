@@ -6,6 +6,8 @@ using MatrixPlus;
 namespace GaussianTexture
 {
   public enum FileType { png, jpg, tga, exr };
+
+
   public class TexToGaussian : ScriptableObject
   {
 
@@ -822,6 +824,34 @@ namespace GaussianTexture
     }
 
     /// <summary>
+    /// For a given FileType enum, returns a string containing the corresponding file extension string
+    /// </summary>
+    /// <param name="fileT">FileType enum to get the extension of</param>
+    /// <returns>A string containing the file type's file extension</returns>
+    public static string FileTypeToString(FileType fileT)
+    {
+      switch (fileT)
+      {
+        case FileType.png:
+          return ".png";
+          break;
+        case FileType.jpg:
+          return ".jpg";
+          break;
+        case FileType.tga:
+         return ".tga";
+          break;
+        case FileType.exr:
+          return ".exr";
+          break;
+        default:
+          return ".png";
+          break;
+      }
+    }
+
+
+    /// <summary>
     /// Finds the compute shader dependencies and assigns them by using the ability for ScriptableObjects to locate their source
     /// script file location. Assuming the user hasn't messed with the file structure, the Shaders folder containing all the compute
     /// shaders is located next to the scripts folder holding this script.
@@ -1147,25 +1177,8 @@ namespace GaussianTexture
         outputImageDir = inputPath;
       }
 
-      string outputFileType;
-      switch (outputImageType)
-      {
-        case FileType.png:
-          outputFileType = ".png";
-          break;
-        case FileType.jpg:
-          outputFileType = ".jpg";
-          break;
-        case FileType.tga:
-          outputFileType = ".tga";
-          break;
-        case FileType.exr:
-          outputFileType = ".exr";
-          break;
-        default:
-          outputFileType = ".png";
-          break;
-      }
+      string outputFileType = FileTypeToString(outputImageType);
+
       string outputImagePath = Path.Combine(outputImageDir, inputName + "_gauss" + outputFileType);
       string outputLUTPath = Path.Combine(outputImageDir, inputName + "_lut.asset");
       File.WriteAllBytes(Path.Combine(dataPath, outputImagePath), outBytes);
