@@ -163,7 +163,7 @@ public class GaussTexUI : EditorWindow
           string inputName = Path.GetFileNameWithoutExtension(inputNameAndPath);
           string inputPath = Path.GetDirectoryName(inputNameAndPath);
 
-          string outputImagePath = Path.Combine(inputPath, inputName + "_gauss" + TexToGaussian.FileTypeToString(fileType));
+          string outputImagePath = Path.Combine(inputPath, inputName + "_gauss" + fileType);
           string outputLUTPath = Path.Combine(inputPath, inputName + "_lut.asset");
           string outputColorspacePath = Path.Combine(inputPath, inputName + "_Colorspace.asset");
           EditorGUIUtility.PingObject(AssetDatabase.LoadMainAssetAtPath(outputImagePath));
