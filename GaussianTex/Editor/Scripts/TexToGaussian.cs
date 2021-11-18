@@ -834,19 +834,14 @@ namespace GaussianTexture
       {
         case FileType.png:
           return ".png";
-          break;
         case FileType.jpg:
           return ".jpg";
-          break;
         case FileType.tga:
          return ".tga";
-          break;
         case FileType.exr:
           return ".exr";
-          break;
         default:
           return ".png";
-          break;
       }
     }
 
