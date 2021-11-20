@@ -418,7 +418,7 @@ namespace GaussianTexture
       float length2 = maxColors[2] - minColors[2];
 
       // Reorder the values in the color channels so that the channel with the greatest range of values is stored in the green channel
-
+      
       int[] SwizzleMask = SortAxis(ref eigen0, ref eigen1, ref eigen2, ref length0, ref length1, ref length2, ref minColors, ref maxColors);
       int swizzleKern = TexturePreprocessor.FindKernel("SwizzleColors");
       TexturePreprocessor.SetInt(texWidthP, TexIn.width);
@@ -426,7 +426,7 @@ namespace GaussianTexture
       TexturePreprocessor.SetInts(swizzleMaskP, SwizzleMask);
       TexturePreprocessor.Dispatch(swizzleKern, Mathf.Max(1, TexIn.width * TexIn.height / 1024), 1, 1);
       Debug.Log(string.Format("Swizzle Mask: {0}, {1}, {2}, {3}", SwizzleMask[0], SwizzleMask[1], SwizzleMask[2], SwizzleMask[3]));
-
+      
       /* Modify the new colorspace so it is centered on the minimum value of each channel and scale the basis vectors to be the same lengths as
        * the bounding box dimensions. This makes it so that the values in each channel range from 0 to 1
        */
@@ -442,9 +442,9 @@ namespace GaussianTexture
 
       
 
-      Axis0 = new Vector4(eigen0.x * length0, eigen0.y * length0, eigen0.z * length0, 1.0f / length0);
-      Axis1 = new Vector4(eigen1.x * length1, eigen1.y * length1, eigen1.z * length1, 1.0f / length1);
-      Axis2 = new Vector4(eigen2.x * length2, eigen2.y * length2, eigen2.z * length2, 1.0f / length2);
+      Axis0 = new Vector4(eigen0.x * length0, eigen0.y * length0, eigen0.z * length0, Mathf.Min(1.0f / length0, 10));
+      Axis1 = new Vector4(eigen1.x * length1, eigen1.y * length1, eigen1.z * length1, Mathf.Min(1.0f / length1, 10));
+      Axis2 = new Vector4(eigen2.x * length2, eigen2.y * length2, eigen2.z * length2, Mathf.Min(1.0f / length2, 10));
       ColorCenter = new Vector4(center.x, center.y, center.z, 0);
 
       /*
@@ -834,19 +834,14 @@ namespace GaussianTexture
       {
         case FileType.png:
           return ".png";
-          break;
         case FileType.jpg:
           return ".jpg";
-          break;
         case FileType.tga:
          return ".tga";
-          break;
         case FileType.exr:
           return ".exr";
-          break;
         default:
           return ".png";
-          break;
       }
     }
 

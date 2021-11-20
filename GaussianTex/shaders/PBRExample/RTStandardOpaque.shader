@@ -14,11 +14,13 @@ Shader "Error.mdl/PBR Opaque Random Tiling"
 		[hdr] _Color("Albedo", Color) = (1,1,1,1)
 		[Gamma] _Metallic("Metallic", Range(0, 1)) = 0
 		_Smoothness("Smoothness/Roughness", Range(0, 1)) = 1
+		_NormalStrength ("Normal Map Strength", float) = 1
 		_TilingScale("Random Tiling Scale", float) = 1.732050808
 		_CsCenter("Colorspace Center", Vector) = (0,0,0,0)
         _CX("Colorspace X", Vector) = (1, 0, 0, 1)
         _CY("Colorspace Y", Vector) = (0, 1, 0, 1)
         _CZ("Colorspace Z", Vector) = (0, 0, 1, 1)
+
 	}
 	SubShader
 	{

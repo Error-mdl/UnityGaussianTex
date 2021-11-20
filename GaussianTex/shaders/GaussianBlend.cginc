@@ -50,7 +50,7 @@ struct colorspace
 
 float4 LookUpTableR(Texture2DArray lut, float2 lutDim, const float coords, const float mip)
 {
-    uint coords1 = floor(coords * lutDim.x * lutDim.y);
+    uint coords1 = floor(coords * (lutDim.x * lutDim.y - 1.0));
     uint LUTWidth = (uint)lutDim.x;
     uint LUTModW = LUTWidth - 1; // x % y is equivalent to x & (y - 1) if y is power of 2
     uint LUTDivW = firstbithigh(LUTWidth); // LUTWidth is a power of 2, so firstbithigh gives log2(LUTWidth)
@@ -76,7 +76,7 @@ float4 LookUpTableR(Texture2DArray lut, float2 lutDim, const float coords, const
 
 float4 LookUpTableRG(Texture2DArray lut, float2 lutDim, const float2 coords, const float mip)
 {
-    uint2 coords1 = floor(coords * lutDim.x * lutDim.y);
+    uint2 coords1 = floor(coords * (lutDim.x * lutDim.y - 1.0));
     uint LUTWidth = (uint)lutDim.x;
     uint LUTModW = LUTWidth - 1; // x % y is equivalent to x & (y - 1) if y is power of 2
     uint LUTDivW = firstbithigh(LUTWidth); // LUTWidth is a power of 2, so firstbithigh gives log2(LUTWidth)
@@ -105,7 +105,7 @@ float4 LookUpTableRG(Texture2DArray lut, float2 lutDim, const float2 coords, con
 
 float4 LookUpTableRA(Texture2DArray lut, float2 lutDim, const float2 coords, const float mip)
 {
-    uint2 coords1 = floor(coords * lutDim.x * lutDim.y);
+    uint2 coords1 = floor(coords * (lutDim.x * lutDim.y - 1.0));
     uint LUTWidth = (uint)lutDim.x;
     uint LUTModW = LUTWidth - 1; // x % y is equivalent to x & (y - 1) if y is power of 2
     uint LUTDivW = firstbithigh(LUTWidth); // LUTWidth is a power of 2, so firstbithigh gives log2(LUTWidth)
@@ -130,7 +130,7 @@ float4 LookUpTableRA(Texture2DArray lut, float2 lutDim, const float2 coords, con
 
 float4 LookUpTableRGB(Texture2DArray lut, float2 lutDim, const float3 coords, const float mip)
 {
-    uint3 coords1 = floor(coords * lutDim.x * lutDim.y);
+    uint3 coords1 = floor(coords * (lutDim.x * lutDim.y - 1.0));
     uint LUTWidth = (uint)lutDim.x;
     uint LUTModW = LUTWidth - 1; // x % y is equivalent to x & (y - 1) if y is power of 2
     uint LUTDivW = firstbithigh(LUTWidth); // LUTWidth is a power of 2, so firstbithigh gives log2(LUTWidth)
@@ -154,7 +154,7 @@ float4 LookUpTableRGB(Texture2DArray lut, float2 lutDim, const float3 coords, co
 
 float4 LookUpTableRGBA(Texture2DArray lut, float2 lutDim, const float4 coords, const float mip)
 {
-    uint4 coords1 = floor(coords * lutDim.x * lutDim.y);
+    uint4 coords1 = floor(coords * (lutDim.x * lutDim.y - 1.0));
     uint LUTWidth = (uint)lutDim.x;
     uint LUTModW = LUTWidth - 1; // x % y is equivalent to x & (y - 1) if y is power of 2
     uint LUTDivW = firstbithigh(LUTWidth); // LUTWidth is a power of 2, so firstbithigh gives log2(LUTWidth)
